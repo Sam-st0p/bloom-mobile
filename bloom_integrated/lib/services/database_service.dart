@@ -4,7 +4,7 @@ final _supabase = Supabase.instance.client;
 
 class DatabaseService {
 
-  // ── MODULES ──────────────────────────────────────────────────────────────
+  // ── MODULES ────────────────────────────────────────────────────────
   static Future<List<Map<String, dynamic>>> fetchModules() async {
     try {
       final data = await _supabase
@@ -13,7 +13,7 @@ class DatabaseService {
           .eq('status', 'published')
           .order('created_at', ascending: false);
       return List<Map<String, dynamic>>.from(data);
-    } catch (e) { /* non-critical */ }
+    } catch (e) {}
     return [];
   }
 
@@ -22,11 +22,11 @@ class DatabaseService {
       final userId = _supabase.auth.currentUser?.id;
       if (userId == null) return [];
       final data = await _supabase
-          .from('student_progress')
+          .from('module_progress')
           .select('*')
-          .eq('student_id', userId);
+          .eq('user_id', userId);
       return List<Map<String, dynamic>>.from(data);
-    } catch (e) { /* non-critical */ }
+    } catch (e) {}
     return [];
   }
 
@@ -34,30 +34,31 @@ class DatabaseService {
     try {
       final userId = _supabase.auth.currentUser?.id;
       if (userId == null) return;
-      await _supabase.from('student_progress').upsert({
-        'student_id': userId,
+      await _supabase.from('module_progress').upsert({
+        'user_id': userId,
         'module_id': moduleId,
-        'progress_percentage': progressPct,
-        'updated_at': DateTime.now().toIso8601String(),
-      });
-    } catch (e) { /* non-critical */ }
+        'progress_percent': progressPct,
+        'status': progressPct == 100 ? 'completed' : 'in_progress',
+        'last_accessed_at': DateTime.now().toIso8601String(),
+      }, onConflict: 'user_id,module_id');
+    } catch (e) {}
   }
 
-  // ── SEMINARS ─────────────────────────────────────────────────────────────
+  // ── SEMINARS ───────────────────────────────────────────────────────
   static Future<List<Map<String, dynamic>>> fetchSeminars() async {
     try {
       final data = await _supabase
           .from('seminars')
           .select('*')
-          .eq('status', 'active');
+          .eq('is_public', true);
       final list = List<Map<String, dynamic>>.from(data);
       list.sort((a, b) {
-        final aDate = a['scheduled_at'] ?? a['date'] ?? '';
-        final bDate = b['scheduled_at'] ?? b['date'] ?? '';
+        final aDate = a['start_date'] ?? a['scheduled_at'] ?? '';
+        final bDate = b['start_date'] ?? b['scheduled_at'] ?? '';
         return bDate.compareTo(aDate);
       });
       return list;
-    } catch (e) { /* non-critical */ }
+    } catch (e) {}
     return [];
   }
 
@@ -66,8 +67,10 @@ class DatabaseService {
       final userId = _supabase.auth.currentUser?.id;
       if (userId == null) return 'Not logged in';
       await _supabase.from('seminar_registrations').insert({
-        'student_id': userId,
+        'user_id': userId,
         'seminar_id': seminarId,
+        'status': 'registered',
+        'registered_at': DateTime.now().toIso8601String(),
       });
       return null;
     } catch (e) {
@@ -82,41 +85,30 @@ class DatabaseService {
       final data = await _supabase
           .from('seminar_registrations')
           .select('*, seminars(*)')
-          .eq('student_id', userId);
+          .eq('user_id', userId);
       return List<Map<String, dynamic>>.from(data);
-    } catch (e) { /* non-critical */ }
+    } catch (e) {}
     return [];
   }
 
-  // ── CALENDAR EVENTS ───────────────────────────────────────────────────────
+  // ── EVENTS ─────────────────────────────────────────────────────────
   static Future<List<Map<String, dynamic>>> fetchEvents() async {
     try {
       final data = await _supabase
-          .from('calendar_events')
+          .from('events')
           .select('*')
-          .eq('status', 'published');
-      final list = List<Map<String, dynamic>>.from(data);
-      list.sort((a, b) {
-        final aDate = _eventDate(a);
-        final bDate = _eventDate(b);
-        return aDate.compareTo(bDate);
-      });
-      return list;
-    } catch (e) { /* non-critical */ }
+          .order('start_date');
+      return List<Map<String, dynamic>>.from(data);
+    } catch (e) {}
     return [];
   }
 
-  static String _eventDate(Map<String, dynamic> ev) {
-    final raw = ev['start_date'] ?? ev['start_time'] ?? ev['scheduled_at'] ?? ev['date'] ?? ev['created_at'];
-    return raw != null ? raw.toString().substring(0, 10) : '';
-  }
-
-  // ── BADGES ────────────────────────────────────────────────────────────────
+  // ── BADGES ─────────────────────────────────────────────────────────
   static Future<List<Map<String, dynamic>>> fetchBadges() async {
     try {
       final data = await _supabase.from('badges').select('*');
       return List<Map<String, dynamic>>.from(data);
-    } catch (e) { /* non-critical */ }
+    } catch (e) {}
     return [];
   }
 
@@ -127,15 +119,15 @@ class DatabaseService {
       final data = await _supabase
           .from('student_badges')
           .select('badge_id')
-          .eq('student_id', userId);
+          .eq('user_id', userId);
       return List<Map<String, dynamic>>.from(data)
           .map((row) => row['badge_id'].toString())
           .toList();
-    } catch (e) { /* non-critical */ }
+    } catch (e) {}
     return [];
   }
 
-  // ── CERTIFICATES ──────────────────────────────────────────────────────────
+  // ── CERTIFICATES ───────────────────────────────────────────────────
   static Future<List<Map<String, dynamic>>> fetchMyCertificates() async {
     try {
       final userId = _supabase.auth.currentUser?.id;
@@ -143,27 +135,28 @@ class DatabaseService {
       final data = await _supabase
           .from('certificates')
           .select('*')
-          .eq('student_id', userId)
-          .eq('status', 'active');
+          .eq('user_id', userId)
+          .eq('is_revoked', false);
       return List<Map<String, dynamic>>.from(data);
-    } catch (e) { /* non-critical */ }
+    } catch (e) {}
     return [];
   }
 
-  // ── ANNOUNCEMENTS ─────────────────────────────────────────────────────────
+  // ── ANNOUNCEMENTS ──────────────────────────────────────────────────
   static Future<List<Map<String, dynamic>>> fetchAnnouncements() async {
     try {
       final data = await _supabase
           .from('announcements')
           .select('*')
-          .eq('status', 'published')
-          .order('created_at', ascending: false);
+          .lte('published_at', DateTime.now().toIso8601String())
+          .order('is_pinned', ascending: false)
+          .order('published_at', ascending: false);
       return List<Map<String, dynamic>>.from(data);
-    } catch (e) { /* non-critical */ }
+    } catch (e) {}
     return [];
   }
 
-  // ── PROFILE ───────────────────────────────────────────────────────────────
+  // ── PROFILE ────────────────────────────────────────────────────────
   static Future<Map<String, dynamic>?> fetchMyProfile() async {
     try {
       final userId = _supabase.auth.currentUser?.id;
@@ -174,7 +167,7 @@ class DatabaseService {
           .eq('id', userId)
           .maybeSingle();
       return data;
-    } catch (e) { /* non-critical */ }
+    } catch (e) {}
     return null;
   }
 
@@ -183,6 +176,7 @@ class DatabaseService {
       final userId = _supabase.auth.currentUser?.id;
       if (userId == null) return;
       await _supabase.from('profiles').update(updates).eq('id', userId);
-    } catch (e) { /* non-critical */ }
+    } catch (e) {}
   }
 }
+
