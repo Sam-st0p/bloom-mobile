@@ -1,0 +1,48 @@
+# BLOOM App — .gitignore
+
+# ── CRITICAL: Environment variables — NEVER commit ──────────────────
+.env
+.env.local
+.env.production
+.env.staging
+
+# ── Flutter / Dart ───────────────────────────────────────────────────
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+build/
+*.g.dart
+*.freezed.dart
+
+# ── Android ──────────────────────────────────────────────────────────
+android/local.properties
+android/.gradle
+android/app/google-services.json
+android/key.properties
+
+# ── iOS / macOS ───────────────────────────────────────────────────────
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/Flutter.framework
+ios/Flutter/Flutter.podspec
+macos/Pods/
+*.xcworkspace/xcuserdata/
+
+# ── Web ───────────────────────────────────────────────────────────────
+# (web/ folder is committed — it contains your web entry point)
+
+# ── IDE ───────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.iml
+*.suo
+*.user
+
+# ── OS ────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Misc ──────────────────────────────────────────────────────────────
+*.log
+pubspec.lock
