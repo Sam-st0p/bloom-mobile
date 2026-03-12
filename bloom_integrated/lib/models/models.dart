@@ -55,7 +55,7 @@ class SeminarModel {
   });
 
   factory SeminarModel.fromMap(Map<String, dynamic> map) {
-    final rawDate = map['scheduled_at'] ?? map['date'] ?? '';
+    final rawDate = map['scheduled_start'] ?? map['scheduled_at'] ?? map['date'] ?? '';
     final dateStr = rawDate.toString().isNotEmpty
         ? rawDate.toString().substring(0, 10)
         : 'TBA';

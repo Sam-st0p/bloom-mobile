@@ -64,7 +64,7 @@ class _EventsScreenState extends State<EventsScreen>
           .from('seminars')
           .select('*')
           .eq('is_public', true)
-          .order('start_date');
+          .order('scheduled_start');
 
       Set<String> registered = {};
       if (userId != null) {
@@ -95,7 +95,7 @@ class _EventsScreenState extends State<EventsScreen>
       final data = await _supabase
           .from('events')
           .select('*')
-          .order('start_date');
+          .order('scheduled_start');
 
       if (mounted) {
         setState(() {
@@ -297,7 +297,7 @@ class _EventsScreenState extends State<EventsScreen>
           final isCompleted = status == 'completed';
 
           // Format date
-          final rawDate = s['start_date'] ?? s['scheduled_at'] ?? '';
+          final rawDate = s['scheduled_start'] ?? s['scheduled_at'] ?? s['start_date'] ?? '';
           final dateStr = rawDate.toString().length >= 10
               ? rawDate.toString().substring(0, 10)
               : 'TBA';

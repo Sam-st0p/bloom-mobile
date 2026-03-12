@@ -1,6 +1,5 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-// Use Supabase.instance.client directly — no separate config file needed
 final _supabase = Supabase.instance.client;
 
 class AuthService {
@@ -20,7 +19,8 @@ class AuthService {
     required String password,
     required String fullName,
     required String studentId,
-    required String courseYear,
+    required String department,
+    required int yearLevel,
   }) async {
     try {
       final response = await _supabase.auth.signUp(
@@ -29,7 +29,8 @@ class AuthService {
         data: {
           'full_name': fullName,
           'student_id': studentId,
-          'course_year': courseYear,
+          'department': department,
+          'year_level': yearLevel,
         },
       );
       if (response.user != null) {
@@ -37,8 +38,10 @@ class AuthService {
           'id': response.user!.id,
           'full_name': fullName,
           'student_id': studentId,
-          'course_year': courseYear,
+          'department': department,
+          'year_level': yearLevel,
           'email': email,
+          'is_active': true,
         });
       }
       return null;

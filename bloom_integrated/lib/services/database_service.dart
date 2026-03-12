@@ -53,8 +53,8 @@ class DatabaseService {
           .eq('is_public', true);
       final list = List<Map<String, dynamic>>.from(data);
       list.sort((a, b) {
-        final aDate = a['start_date'] ?? a['scheduled_at'] ?? '';
-        final bDate = b['start_date'] ?? b['scheduled_at'] ?? '';
+        final aDate = a['scheduled_start'] ?? a['start_date'] ?? '';
+        final bDate = b['scheduled_start'] ?? b['start_date'] ?? '';
         return bDate.compareTo(aDate);
       });
       return list;
@@ -97,7 +97,7 @@ class DatabaseService {
       final data = await _supabase
           .from('events')
           .select('*')
-          .order('start_date');
+          ;
       return List<Map<String, dynamic>>.from(data);
     } catch (e) {}
     return [];
@@ -179,4 +179,3 @@ class DatabaseService {
     } catch (e) {}
   }
 }
-
