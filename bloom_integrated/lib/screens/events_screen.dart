@@ -4,30 +4,28 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../theme/app_theme.dart';
 import '../models/models.dart';
 import '../widgets/common_widgets.dart';
+import '../services/activity_service.dart';
+
+final _supabase = Supabase.instance.client;
 
 class EventsScreen extends StatefulWidget {
   const EventsScreen({super.key});
-
   @override
   State<EventsScreen> createState() => _EventsScreenState();
 }
 
-class _EventsScreenState extends State<EventsScreen>
-    with SingleTickerProviderStateMixin {
-  final _supabase = Supabase.instance.client;
+class _EventsScreenState extends State<EventsScreen> with SingleTickerProviderStateMixin {
   late TabController _tabController;
 
-  // Seminars
   List<Map<String, dynamic>> _seminars = [];
-  Set<String> _registeredIds = {};
-  bool _seminarsLoading = true;
-
-  // Events
   List<EventModel> _events = [];
-  bool _eventsLoading = true;
-
-  // Certificates
   List<CertificateModel> _certificates = [];
+
+  Set<String> _registeredIds = {};
+  Set<String> _attendedIds = {};
+
+  bool _seminarsLoading = true;
+  bool _eventsLoading = true;
   bool _certsLoading = true;
 
   // Evaluation state
@@ -53,7 +51,7 @@ class _EventsScreenState extends State<EventsScreen>
     super.dispose();
   }
 
-  // ── Data loaders ───────────────────────────────────────────────────
+  // ── Loaders ────────────────────────────────────────────────────────
 
   Future<void> _loadSeminars() async {
     setState(() => _seminarsLoading = true);
@@ -67,20 +65,27 @@ class _EventsScreenState extends State<EventsScreen>
           .order('scheduled_start');
 
       Set<String> registered = {};
+      Set<String> attended = {};
+
       if (userId != null) {
         final regs = await _supabase
             .from('seminar_registrations')
             .select('seminar_id')
-            .eq('user_id', userId)
-            .eq('status', 'registered');
-        registered =
-            (regs as List).map((r) => r['seminar_id'].toString()).toSet();
+            .eq('user_id', userId);
+        registered = (regs as List).map((r) => r['seminar_id'].toString()).toSet();
+
+        final att = await _supabase
+            .from('seminar_attendance')
+            .select('seminar_id')
+            .eq('user_id', userId);
+        attended = (att as List).map((a) => a['seminar_id'].toString()).toSet();
       }
 
       if (mounted) {
         setState(() {
           _seminars = List<Map<String, dynamic>>.from(data as List);
           _registeredIds = registered;
+          _attendedIds = attended;
           _seminarsLoading = false;
         });
       }
@@ -95,8 +100,7 @@ class _EventsScreenState extends State<EventsScreen>
       final data = await _supabase
           .from('events')
           .select('*')
-          .order('scheduled_start');
-
+          .order('start_date');
       if (mounted) {
         setState(() {
           _events = (data as List)
@@ -114,18 +118,13 @@ class _EventsScreenState extends State<EventsScreen>
     setState(() => _certsLoading = true);
     try {
       final userId = _supabase.auth.currentUser?.id;
-      if (userId == null) {
-        setState(() => _certsLoading = false);
-        return;
-      }
-
+      if (userId == null) { setState(() => _certsLoading = false); return; }
       final data = await _supabase
           .from('certificates')
           .select('*, certificate_templates(name)')
           .eq('user_id', userId)
           .eq('is_revoked', false)
           .order('issued_at', ascending: false);
-
       if (mounted) {
         setState(() {
           _certificates = (data as List)
@@ -139,7 +138,9 @@ class _EventsScreenState extends State<EventsScreen>
     }
   }
 
-  Future<void> _registerSeminar(String seminarId) async {
+  // ── Actions ────────────────────────────────────────────────────────
+
+  Future<void> _registerSeminar(String seminarId, String title) async {
     final userId = _supabase.auth.currentUser?.id;
     if (userId == null) return;
     try {
@@ -150,20 +151,59 @@ class _EventsScreenState extends State<EventsScreen>
         'registered_at': DateTime.now().toIso8601String(),
       });
       setState(() => _registeredIds.add(seminarId));
+
+      // Log activity
+      await ActivityService.log(
+        activityType: 'seminar_registered',
+        referenceId: seminarId,
+        referenceType: 'seminar',
+        metadata: {'title': title},
+      );
+
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text('Registered successfully! 🎉'),
-              backgroundColor: AppColors.primary),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Registered successfully! 🎉'),
+            backgroundColor: AppColors.primary));
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text('Already registered or error: $e'),
-              backgroundColor: AppColors.danger),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Already registered or error occurred.'),
+            backgroundColor: AppColors.danger));
+      }
+    }
+  }
+
+  Future<void> _markAttendance(String seminarId, String title) async {
+    final userId = _supabase.auth.currentUser?.id;
+    if (userId == null) return;
+    try {
+      await _supabase.from('seminar_attendance').insert({
+        'user_id': userId,
+        'seminar_id': seminarId,
+        'checked_in_at': DateTime.now().toIso8601String(),
+        'method': 'self',
+      });
+      setState(() => _attendedIds.add(seminarId));
+
+      // Log activity
+      await ActivityService.log(
+        activityType: 'seminar_attended',
+        referenceId: seminarId,
+        referenceType: 'seminar',
+        metadata: {'title': title},
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Attendance marked! ✅'),
+            backgroundColor: AppColors.primary));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Could not mark attendance.'),
+            backgroundColor: AppColors.danger));
       }
     }
   }
@@ -179,12 +219,19 @@ class _EventsScreenState extends State<EventsScreen>
         'comments': _evalCommentCtrl.text.trim(),
         'submitted_at': DateTime.now().toIso8601String(),
       });
+
+      await ActivityService.log(
+        activityType: 'seminar_evaluated',
+        referenceId: _evalSeminarId,
+        referenceType: 'seminar',
+        metadata: {'rating': _rating, 'title': _evalSeminarTitle},
+      );
+
       setState(() => _evalSubmitted = true);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error submitting: $e')),
-        );
+            SnackBar(content: Text('Error submitting: $e')));
       }
     }
   }
@@ -194,7 +241,6 @@ class _EventsScreenState extends State<EventsScreen>
   @override
   Widget build(BuildContext context) {
     if (_evalSeminarId != null) return _buildEvaluation();
-
     return Column(
       children: [
         Container(
@@ -228,15 +274,13 @@ class _EventsScreenState extends State<EventsScreen>
                   ),
                   labelColor: AppColors.primary,
                   unselectedLabelColor: AppColors.textLight,
-                  labelStyle: GoogleFonts.nunito(
-                      fontSize: 12, fontWeight: FontWeight.w800),
-                  unselectedLabelStyle: GoogleFonts.nunito(
-                      fontSize: 12, fontWeight: FontWeight.w800),
+                  labelStyle: GoogleFonts.nunito(fontSize: 12, fontWeight: FontWeight.w800),
+                  unselectedLabelStyle: GoogleFonts.nunito(fontSize: 12, fontWeight: FontWeight.w800),
                   dividerColor: Colors.transparent,
                   tabs: const [
                     Tab(text: '🎓 Seminars'),
                     Tab(text: '📆 Events'),
-                    Tab(text: '📜 Certs')
+                    Tab(text: '📜 Certs'),
                   ],
                 ),
               ),
@@ -247,11 +291,7 @@ class _EventsScreenState extends State<EventsScreen>
         Expanded(
           child: TabBarView(
             controller: _tabController,
-            children: [
-              _buildSeminars(),
-              _buildEvents(),
-              _buildCertificates()
-            ],
+            children: [_buildSeminars(), _buildEvents(), _buildCertificates()],
           ),
         ),
       ],
@@ -262,22 +302,16 @@ class _EventsScreenState extends State<EventsScreen>
 
   Widget _buildSeminars() {
     if (_seminarsLoading) {
-      return const Center(
-          child: CircularProgressIndicator(color: AppColors.primary));
+      return const Center(child: CircularProgressIndicator(color: AppColors.primary));
     }
     if (_seminars.isEmpty) {
       return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.event_outlined,
-                size: 48, color: AppColors.textLight),
-            const SizedBox(height: 12),
-            Text('No seminars available yet',
-                style: GoogleFonts.nunito(
-                    color: AppColors.textLight, fontSize: 14)),
-          ],
-        ),
+        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+          const Icon(Icons.event_outlined, size: 48, color: AppColors.textLight),
+          const SizedBox(height: 12),
+          Text('No seminars available yet',
+              style: GoogleFonts.nunito(color: AppColors.textLight, fontSize: 14)),
+        ]),
       );
     }
 
@@ -291,16 +325,23 @@ class _EventsScreenState extends State<EventsScreen>
         itemBuilder: (context, i) {
           final s = _seminars[i];
           final id = s['id'].toString();
+          final title = s['title'] ?? 'Seminar';
           final isRegistered = _registeredIds.contains(id);
+          final isAttended = _attendedIds.contains(id);
           final status = s['status']?.toString() ?? '';
           final isLive = status == 'ongoing';
           final isCompleted = status == 'completed';
 
-          // Format date
-          final rawDate = s['scheduled_start'] ?? s['scheduled_at'] ?? s['start_date'] ?? '';
+          final rawDate = s['scheduled_start'] ?? s['scheduled_at'] ?? '';
           final dateStr = rawDate.toString().length >= 10
               ? rawDate.toString().substring(0, 10)
               : 'TBA';
+
+          // Time display
+          String timeStr = '';
+          if (rawDate.toString().length >= 16) {
+            timeStr = rawDate.toString().substring(11, 16);
+          }
 
           return AppCard(
             child: Column(
@@ -310,93 +351,114 @@ class _EventsScreenState extends State<EventsScreen>
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     BadgeChip(
-                      label: isLive
-                          ? '🔴 LIVE'
-                          : isCompleted
-                              ? '✅ Completed'
-                              : '📅 Upcoming',
-                      color: isLive
-                          ? AppColors.danger
-                          : isCompleted
-                              ? AppColors.primary
-                              : AppColors.info,
+                      label: isLive ? '🔴 LIVE' : isCompleted ? '✅ Completed' : '📅 Upcoming',
+                      color: isLive ? AppColors.danger : isCompleted ? AppColors.primary : AppColors.info,
                     ),
-                    Text(dateStr,
-                        style: GoogleFonts.nunito(
-                            fontSize: 12, color: AppColors.textLight)),
+                    Text(
+                      timeStr.isNotEmpty ? '$dateStr • $timeStr' : dateStr,
+                      style: GoogleFonts.nunito(fontSize: 12, color: AppColors.textLight),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 10),
-                Text(s['title'] ?? 'Untitled Seminar',
+                Text(title,
                     style: GoogleFonts.nunito(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w800,
-                        color: AppColors.textDark)),
-                if (s['description'] != null) ...[
+                        fontSize: 15, fontWeight: FontWeight.w800, color: AppColors.textDark)),
+                if ((s['description'] ?? '').toString().isNotEmpty) ...[
                   const SizedBox(height: 4),
                   Text(s['description'],
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.nunito(
-                          fontSize: 12, color: AppColors.textMid)),
+                      style: GoogleFonts.nunito(fontSize: 12, color: AppColors.textMid)),
+                ],
+                if ((s['venue'] ?? '').toString().isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Row(children: [
+                    const Icon(Icons.location_on_outlined, size: 14, color: AppColors.textLight),
+                    const SizedBox(width: 4),
+                    Text(s['venue'],
+                        style: GoogleFonts.nunito(fontSize: 12, color: AppColors.textLight)),
+                  ]),
                 ],
                 const SizedBox(height: 12),
+                // Action buttons
                 Row(
                   children: [
+                    // Register / Registered
                     if (!isCompleted)
                       Expanded(
                         child: ElevatedButton(
-                          onPressed: isRegistered
-                              ? null
-                              : () => _registerSeminar(id),
+                          onPressed: isRegistered ? null : () => _registerSeminar(id, title),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: isLive
-                                ? AppColors.danger
-                                : AppColors.primary,
-                            disabledBackgroundColor:
-                                AppColors.primary.withOpacity(0.4),
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12)),
-                            padding:
-                                const EdgeInsets.symmetric(vertical: 12),
+                            backgroundColor: isLive ? AppColors.danger : AppColors.primary,
+                            disabledBackgroundColor: AppColors.primary.withOpacity(0.4),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            padding: const EdgeInsets.symmetric(vertical: 11),
                           ),
                           child: Text(
-                              isRegistered
-                                  ? '✓ Registered'
-                                  : isLive
-                                      ? 'Join Now 🔴'
-                                      : 'Register',
-                              style: GoogleFonts.nunito(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w800,
-                                  color: Colors.white)),
+                            isRegistered ? '✓ Registered' : isLive ? 'Join Now 🔴' : 'Register',
+                            style: GoogleFonts.nunito(
+                                fontSize: 13, fontWeight: FontWeight.w800, color: Colors.white),
+                          ),
                         ),
                       ),
+
+                    // Mark Attendance (only if registered and live/ongoing)
+                    if (isRegistered && isLive && !isAttended) ...[
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: ElevatedButton(
+                          onPressed: () => _markAttendance(id, title),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.accent,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            padding: const EdgeInsets.symmetric(vertical: 11),
+                          ),
+                          child: Text('Mark Attendance',
+                              style: GoogleFonts.nunito(
+                                  fontSize: 12, fontWeight: FontWeight.w800, color: Colors.white)),
+                        ),
+                      ),
+                    ],
+
+                    // Attended badge
+                    if (isAttended) ...[
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+                        decoration: BoxDecoration(
+                          color: AppColors.primary.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: AppColors.primary.withOpacity(0.3)),
+                        ),
+                        child: Text('✅ Attended',
+                            style: GoogleFonts.nunito(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w800,
+                                color: AppColors.primary)),
+                      ),
+                    ],
+
+                    // Evaluate button
                     if (isRegistered || isCompleted) ...[
                       const SizedBox(width: 8),
                       ElevatedButton(
                         onPressed: () => setState(() {
                           _evalSeminarId = id;
-                          _evalSeminarTitle =
-                              s['title'] ?? 'Seminar';
+                          _evalSeminarTitle = title;
                           _evalSubmitted = false;
                           _rating = 0;
                           _evalCommentCtrl.clear();
                         }),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor:
-                              AppColors.accent.withOpacity(0.15),
+                          backgroundColor: AppColors.accent.withOpacity(0.15),
                           foregroundColor: AppColors.accent,
                           elevation: 0,
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12)),
-                          padding: const EdgeInsets.symmetric(
-                              vertical: 12, horizontal: 14),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 14),
                         ),
                         child: Text('Evaluate',
-                            style: GoogleFonts.nunito(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w800)),
+                            style: GoogleFonts.nunito(fontSize: 12, fontWeight: FontWeight.w800)),
                       ),
                     ],
                   ],
@@ -413,31 +475,22 @@ class _EventsScreenState extends State<EventsScreen>
 
   Widget _buildEvents() {
     if (_eventsLoading) {
-      return const Center(
-          child: CircularProgressIndicator(color: AppColors.primary));
+      return const Center(child: CircularProgressIndicator(color: AppColors.primary));
     }
     if (_events.isEmpty) {
       return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.calendar_today_outlined,
-                size: 48, color: AppColors.textLight),
-            const SizedBox(height: 12),
-            Text('No events yet',
-                style: GoogleFonts.nunito(
-                    color: AppColors.textLight, fontSize: 14)),
-          ],
-        ),
+        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+          const Icon(Icons.calendar_today_outlined, size: 48, color: AppColors.textLight),
+          const SizedBox(height: 12),
+          Text('No events yet',
+              style: GoogleFonts.nunito(color: AppColors.textLight, fontSize: 14)),
+        ]),
       );
     }
 
     final colors = [
-      AppColors.primary,
-      AppColors.accent,
-      AppColors.info,
-      const Color(0xFF7B2D8B),
-      const Color(0xFFE63946),
+      AppColors.primary, AppColors.accent, AppColors.info,
+      const Color(0xFF7B2D8B), const Color(0xFFE63946),
     ];
 
     return RefreshIndicator(
@@ -454,18 +507,13 @@ class _EventsScreenState extends State<EventsScreen>
             child: Row(
               children: [
                 Container(
-                  width: 56,
-                  height: 56,
-                  decoration: BoxDecoration(
-                      color: color,
-                      borderRadius: BorderRadius.circular(14)),
+                  width: 56, height: 56,
+                  decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(14)),
                   child: Center(
                     child: Text(ev.date,
                         textAlign: TextAlign.center,
                         style: GoogleFonts.nunito(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w900,
-                            fontSize: 11)),
+                            color: Colors.white, fontWeight: FontWeight.w900, fontSize: 11)),
                   ),
                 ),
                 const SizedBox(width: 14),
@@ -475,16 +523,13 @@ class _EventsScreenState extends State<EventsScreen>
                     children: [
                       Text(ev.title,
                           style: GoogleFonts.nunito(
-                              fontWeight: FontWeight.w800,
-                              fontSize: 14,
-                              color: AppColors.textDark)),
+                              fontWeight: FontWeight.w800, fontSize: 14, color: AppColors.textDark)),
                       const SizedBox(height: 4),
                       BadgeChip(label: ev.category, color: color),
                     ],
                   ),
                 ),
-                const Icon(Icons.chevron_right,
-                    color: AppColors.textLight, size: 18),
+                const Icon(Icons.chevron_right, color: AppColors.textLight, size: 18),
               ],
             ),
           );
@@ -497,35 +542,24 @@ class _EventsScreenState extends State<EventsScreen>
 
   Widget _buildCertificates() {
     if (_certsLoading) {
-      return const Center(
-          child: CircularProgressIndicator(color: AppColors.primary));
+      return const Center(child: CircularProgressIndicator(color: AppColors.primary));
     }
     if (_certificates.isEmpty) {
       return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.workspace_premium_outlined,
-                size: 48, color: AppColors.textLight),
-            const SizedBox(height: 12),
-            Text('No certificates yet',
-                style: GoogleFonts.nunito(
-                    color: AppColors.textLight, fontSize: 14)),
-            const SizedBox(height: 6),
-            Text('Complete modules and seminars to earn certificates',
-                textAlign: TextAlign.center,
-                style: GoogleFonts.nunito(
-                    color: AppColors.textLight, fontSize: 12)),
-          ],
-        ),
+        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+          const Icon(Icons.workspace_premium_outlined, size: 48, color: AppColors.textLight),
+          const SizedBox(height: 12),
+          Text('No certificates yet',
+              style: GoogleFonts.nunito(color: AppColors.textLight, fontSize: 14)),
+          const SizedBox(height: 6),
+          Text('Complete modules and seminars to earn certificates',
+              textAlign: TextAlign.center,
+              style: GoogleFonts.nunito(color: AppColors.textLight, fontSize: 12)),
+        ]),
       );
     }
 
-    final colors = [
-      AppColors.primary,
-      AppColors.info,
-      const Color(0xFF7B2D8B),
-    ];
+    final colors = [AppColors.primary, AppColors.info, const Color(0xFF7B2D8B)];
 
     return RefreshIndicator(
       color: AppColors.primary,
@@ -540,19 +574,16 @@ class _EventsScreenState extends State<EventsScreen>
           return AppCard(
             child: Container(
               decoration: BoxDecoration(
-                  border:
-                      Border(left: BorderSide(color: color, width: 4))),
+                  border: Border(left: BorderSide(color: color, width: 4))),
               padding: const EdgeInsets.only(left: 12),
               child: Row(
                 children: [
                   Container(
-                    width: 48,
-                    height: 48,
+                    width: 48, height: 48,
                     decoration: BoxDecoration(
                         color: color.withOpacity(0.12),
                         borderRadius: BorderRadius.circular(14)),
-                    child: Icon(Icons.workspace_premium_outlined,
-                        color: color, size: 24),
+                    child: Icon(Icons.workspace_premium_outlined, color: color, size: 24),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -561,55 +592,39 @@ class _EventsScreenState extends State<EventsScreen>
                       children: [
                         Text(c.title,
                             style: GoogleFonts.nunito(
-                                fontWeight: FontWeight.w800,
-                                fontSize: 14,
-                                color: AppColors.textDark)),
+                                fontWeight: FontWeight.w800, fontSize: 14, color: AppColors.textDark)),
                         Text('${c.issuer} • ${c.date}',
-                            style: GoogleFonts.nunito(
-                                fontSize: 12,
-                                color: AppColors.textLight)),
+                            style: GoogleFonts.nunito(fontSize: 12, color: AppColors.textLight)),
                         const SizedBox(height: 8),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: OutlinedButton(
-                                onPressed: () {},
-                                style: OutlinedButton.styleFrom(
-                                  side: BorderSide(color: color),
-                                  foregroundColor: color,
-                                  shape: RoundedRectangleBorder(
-                                      borderRadius:
-                                          BorderRadius.circular(10)),
-                                  padding: const EdgeInsets.symmetric(
-                                      vertical: 8),
-                                ),
-                                child: Text('👁 View',
-                                    style: GoogleFonts.nunito(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w700)),
+                        Row(children: [
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: () {},
+                              style: OutlinedButton.styleFrom(
+                                side: BorderSide(color: color),
+                                foregroundColor: color,
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                padding: const EdgeInsets.symmetric(vertical: 8),
                               ),
+                              child: Text('👁 View',
+                                  style: GoogleFonts.nunito(fontSize: 12, fontWeight: FontWeight.w700)),
                             ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: ElevatedButton(
-                                onPressed: () {},
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: color,
-                                  shape: RoundedRectangleBorder(
-                                      borderRadius:
-                                          BorderRadius.circular(10)),
-                                  padding: const EdgeInsets.symmetric(
-                                      vertical: 8),
-                                ),
-                                child: Text('⬇️ Save',
-                                    style: GoogleFonts.nunito(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w700,
-                                        color: Colors.white)),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: ElevatedButton(
+                              onPressed: () {},
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: color,
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                padding: const EdgeInsets.symmetric(vertical: 8),
                               ),
+                              child: Text('⬇️ Save',
+                                  style: GoogleFonts.nunito(
+                                      fontSize: 12, fontWeight: FontWeight.w700, color: Colors.white)),
                             ),
-                          ],
-                        ),
+                          ),
+                        ]),
                       ],
                     ),
                   ),
@@ -627,35 +642,28 @@ class _EventsScreenState extends State<EventsScreen>
   Widget _buildEvaluation() {
     if (_evalSubmitted) {
       return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Text('✅', style: TextStyle(fontSize: 64)),
-            const SizedBox(height: 20),
-            Text('Thank You!',
-                style: GoogleFonts.nunito(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w900,
-                    color: AppColors.textDark)),
-            const SizedBox(height: 8),
-            Text('Your feedback has been submitted to GADRC.',
-                style: GoogleFonts.nunito(color: AppColors.textLight)),
-            const SizedBox(height: 24),
-            ElevatedButton(
-              onPressed: () => setState(() {
-                _evalSeminarId = null;
-                _evalSeminarTitle = null;
-                _evalSubmitted = false;
-                _rating = 0;
-              }),
-              style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primary),
-              child: Text('Done',
-                  style: GoogleFonts.nunito(
-                      color: Colors.white, fontWeight: FontWeight.w700)),
-            ),
-          ],
-        ),
+        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+          const Text('✅', style: TextStyle(fontSize: 64)),
+          const SizedBox(height: 20),
+          Text('Thank You!',
+              style: GoogleFonts.nunito(
+                  fontSize: 22, fontWeight: FontWeight.w900, color: AppColors.textDark)),
+          const SizedBox(height: 8),
+          Text('Your feedback has been submitted to GADRC.',
+              style: GoogleFonts.nunito(color: AppColors.textLight)),
+          const SizedBox(height: 24),
+          ElevatedButton(
+            onPressed: () => setState(() {
+              _evalSeminarId = null;
+              _evalSeminarTitle = null;
+              _evalSubmitted = false;
+              _rating = 0;
+            }),
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
+            child: Text('Done',
+                style: GoogleFonts.nunito(color: Colors.white, fontWeight: FontWeight.w700)),
+          ),
+        ]),
       );
     }
 
@@ -667,25 +675,17 @@ class _EventsScreenState extends State<EventsScreen>
           child: Row(
             children: [
               IconButton(
-                onPressed: () =>
-                    setState(() => _evalSeminarId = null),
-                icon: const Icon(Icons.chevron_left,
-                    color: AppColors.textMid),
+                onPressed: () => setState(() => _evalSeminarId = null),
+                icon: const Icon(Icons.chevron_left, color: AppColors.textMid),
               ),
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Seminar Evaluation',
-                        style: GoogleFonts.nunito(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w900,
-                            color: AppColors.textDark)),
-                    Text('${_evalSeminarTitle ?? ''} • Help us improve',
-                        style: GoogleFonts.nunito(
-                            fontSize: 12, color: AppColors.textLight)),
-                  ],
-                ),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('Seminar Evaluation',
+                      style: GoogleFonts.nunito(
+                          fontSize: 18, fontWeight: FontWeight.w900, color: AppColors.textDark)),
+                  Text('${_evalSeminarTitle ?? ''} • Help us improve',
+                      style: GoogleFonts.nunito(fontSize: 12, color: AppColors.textLight)),
+                ]),
               ),
             ],
           ),
@@ -699,26 +699,26 @@ class _EventsScreenState extends State<EventsScreen>
                   children: [
                     Text('Overall Rating',
                         style: GoogleFonts.nunito(
-                            fontWeight: FontWeight.w800,
-                            color: AppColors.textDark)),
+                            fontWeight: FontWeight.w800, color: AppColors.textDark)),
                     const SizedBox(height: 12),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
-                      children: List.generate(
-                        5,
-                        (i) => GestureDetector(
-                          onTap: () => setState(() => _rating = i + 1),
-                          child: Padding(
-                            padding:
-                                const EdgeInsets.symmetric(horizontal: 4),
-                            child: Icon(Icons.star_rounded,
-                                size: 40,
-                                color: i < _rating
-                                    ? const Color(0xFFFFBA08)
-                                    : AppColors.border),
-                          ),
+                      children: List.generate(5, (i) => GestureDetector(
+                        onTap: () => setState(() => _rating = i + 1),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                          child: Icon(Icons.star_rounded,
+                              size: 40,
+                              color: i < _rating ? const Color(0xFFFFBA08) : AppColors.border),
                         ),
-                      ),
+                      )),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      _rating == 0 ? 'Tap to rate' : ['', 'Poor', 'Fair', 'Good', 'Very Good', 'Excellent'][_rating],
+                      style: GoogleFonts.nunito(
+                          color: _rating == 0 ? AppColors.textLight : AppColors.primary,
+                          fontWeight: FontWeight.w700),
                     ),
                   ],
                 ),
@@ -730,30 +730,24 @@ class _EventsScreenState extends State<EventsScreen>
                   children: [
                     Text('Comments & Suggestions',
                         style: GoogleFonts.nunito(
-                            fontWeight: FontWeight.w800,
-                            color: AppColors.textDark)),
+                            fontWeight: FontWeight.w800, color: AppColors.textDark)),
                     const SizedBox(height: 10),
                     TextField(
                       controller: _evalCommentCtrl,
                       maxLines: 4,
-                      style: GoogleFonts.nunito(
-                          fontSize: 13, color: AppColors.textDark),
+                      style: GoogleFonts.nunito(fontSize: 13, color: AppColors.textDark),
                       decoration: InputDecoration(
                         hintText: 'Share your thoughts...',
-                        hintStyle:
-                            GoogleFonts.nunito(color: AppColors.textLight),
+                        hintStyle: GoogleFonts.nunito(color: AppColors.textLight),
                         border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
-                            borderSide: const BorderSide(
-                                color: AppColors.border)),
+                            borderSide: const BorderSide(color: AppColors.border)),
                         enabledBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
-                            borderSide: const BorderSide(
-                                color: AppColors.border)),
+                            borderSide: const BorderSide(color: AppColors.border)),
                         focusedBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
-                            borderSide: const BorderSide(
-                                color: AppColors.primary, width: 2)),
+                            borderSide: const BorderSide(color: AppColors.primary, width: 2)),
                       ),
                     ),
                   ],
@@ -766,17 +760,13 @@ class _EventsScreenState extends State<EventsScreen>
                   onPressed: _rating == 0 ? null : _submitEvaluation,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.primary,
-                    disabledBackgroundColor:
-                        AppColors.primary.withOpacity(0.4),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16)),
+                    disabledBackgroundColor: AppColors.primary.withOpacity(0.4),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                     padding: const EdgeInsets.symmetric(vertical: 16),
                   ),
                   child: Text('Submit Evaluation',
                       style: GoogleFonts.nunito(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w800,
-                          color: Colors.white)),
+                          fontSize: 15, fontWeight: FontWeight.w800, color: Colors.white)),
                 ),
               ),
             ],
