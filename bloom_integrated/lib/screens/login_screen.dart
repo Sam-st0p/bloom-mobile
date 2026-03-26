@@ -38,7 +38,6 @@ class _LoginScreenState extends State<LoginScreen> {
 
     setState(() { _loading = true; _error = null; });
 
-    // Call Supabase auth via AuthService
     final error = await AuthService.signIn(email, password);
 
     if (mounted) {

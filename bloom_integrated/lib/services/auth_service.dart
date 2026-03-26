@@ -6,6 +6,15 @@ class AuthService {
   static Future<String?> signIn(String email, String password) async {
     try {
       await _supabase.auth.signInWithPassword(email: email, password: password);
+
+      final user = _supabase.auth.currentUser;
+      if (user != null) {
+        await _supabase
+            .from('profiles')
+            .update({'last_sign_in_at': DateTime.now().toUtc().toIso8601String()})
+            .eq('id', user.id);
+      }
+
       return null;
     } on AuthException catch (e) {
       return e.message;
