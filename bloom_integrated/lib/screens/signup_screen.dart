@@ -1,84 +1,151 @@
+// lib/screens/signup_screen.dart
+// BLOOM GAD Mobile App — Signup Screen
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
 import '../services/auth_service.dart';
+import '../utils/input_formatters.dart';
+import '../utils/validators.dart';
 
 class SignupScreen extends StatefulWidget {
   final VoidCallback onGoLogin;
   final VoidCallback onSignup;
 
-  const SignupScreen({super.key, required this.onGoLogin, required this.onSignup});
+  const SignupScreen({
+    super.key,
+    required this.onGoLogin,
+    required this.onSignup,
+  });
 
   @override
   State<SignupScreen> createState() => _SignupScreenState();
 }
 
 class _SignupScreenState extends State<SignupScreen> {
-  int _step = 1;
-  bool _loading = false;
+  int     _step    = 1;
+  bool    _loading = false;
   String? _error;
 
-  final _nameCtrl       = TextEditingController();
-  final _idCtrl         = TextEditingController();
-  final _deptCtrl       = TextEditingController();
-  final _emailCtrl      = TextEditingController();
-  final _passCtrl       = TextEditingController();
-  final _confirmCtrl    = TextEditingController();
-  int _yearLevel        = 1;
+  final _nameCtrl    = TextEditingController();
+  final _idCtrl      = TextEditingController();
+  final _emailCtrl   = TextEditingController();
+  final _passCtrl    = TextEditingController();
+  final _confirmCtrl = TextEditingController();
 
-  final List<String> _yearLabels = ['1st Year', '2nd Year', '3rd Year', '4th Year', '5th Year'];
+  String? _selectedDepartment;
+  int     _selectedYearLevel = 1;
+
+  // Track password visibility separately for each field
+  bool _obscurePass    = true;
+  bool _obscureConfirm = true;
 
   @override
   void dispose() {
-    _nameCtrl.dispose(); _idCtrl.dispose(); _deptCtrl.dispose();
-    _emailCtrl.dispose(); _passCtrl.dispose(); _confirmCtrl.dispose();
+    _nameCtrl.dispose();
+    _idCtrl.dispose();
+    _emailCtrl.dispose();
+    _passCtrl.dispose();
+    _confirmCtrl.dispose();
     super.dispose();
   }
 
-  Future<void> _handleSignup() async {
-    final email    = _emailCtrl.text.trim();
-    final password = _passCtrl.text;
-    final confirm  = _confirmCtrl.text;
+  // ── Step 1 validation ──────────────────────────────────────
+  String? _validateStep1() {
+    final name = _nameCtrl.text.trim();
+    final id   = _idCtrl.text.trim();
 
-    if (email.isEmpty || password.isEmpty) {
-      setState(() => _error = 'Please fill in all fields.');
-      return;
+    if (!isValidFullName(name)) {
+      return 'Please enter your full name (first and last name).';
     }
-    if (password != confirm) {
-      setState(() => _error = 'Passwords do not match.');
-      return;
+    if (id.isEmpty) {
+      return 'Student ID is required.';
     }
-    if (password.length < 8) {
-      setState(() => _error = 'Password must be at least 8 characters.');
+    if (!isValidStudentId(formatStudentId(id))) {
+      return 'Invalid student ID format. Example: 2023-12345';
+    }
+    if (_selectedDepartment == null) {
+      return 'Please select your department / course.';
+    }
+    return null;
+  }
+
+  // ── Step 2 validation ──────────────────────────────────────
+  String? _validateStep2() {
+    final emailError = AppValidators.email(_emailCtrl.text);
+    if (emailError != null) return emailError;
+
+    final passError = AppValidators.password(_passCtrl.text);
+    if (passError != null) return passError;
+
+    if (_confirmCtrl.text.isEmpty) {
+      return 'Please confirm your password.';
+    }
+    if (_passCtrl.text != _confirmCtrl.text) {
+      return 'Passwords do not match.';
+    }
+    return null;
+  }
+
+  // ── Signup handler ─────────────────────────────────────────
+  Future<void> _handleSignup() async {
+    // Validate step 2 before submitting
+    final validationError = _validateStep2();
+    if (validationError != null) {
+      setState(() => _error = validationError);
       return;
     }
 
     setState(() { _loading = true; _error = null; });
 
+    final normalizedName = formatFullName(_nameCtrl.text);
+    final normalizedId   = formatStudentId(_idCtrl.text);
+
     final error = await AuthService.signUp(
-      email:      email,
-      password:   password,
-      fullName:   _nameCtrl.text.trim(),
-      studentId:  _idCtrl.text.trim(),
-      department: _deptCtrl.text.trim(),
-      yearLevel:  _yearLevel,
+      email:      AppValidators.sanitize(_emailCtrl.text).toLowerCase(),
+      password:   _passCtrl.text,
+      fullName:   normalizedName,
+      studentId:  normalizedId,
+      department: _selectedDepartment!,
+      yearLevel:  _selectedYearLevel,
     );
 
     if (mounted) {
       setState(() => _loading = false);
       if (error != null) {
-        setState(() => _error = error);
+        setState(() => _error = _friendlySignupError(error));
       } else {
         widget.onSignup();
       }
     }
   }
 
+  // ── Friendly signup error mapper ───────────────────────────
+  String _friendlySignupError(String raw) {
+    final r = raw.toLowerCase();
+    if (r.contains('already registered') || r.contains('already exists')) {
+      return 'An account with this email already exists. Try signing in.';
+    }
+    if (r.contains('invalid email')) {
+      return 'Please enter a valid email address.';
+    }
+    if (r.contains('password')) {
+      return 'Password does not meet the requirements.';
+    }
+    if (r.contains('network') || r.contains('connection')) {
+      return 'No internet connection. Please check your network.';
+    }
+    return 'Sign up failed. Please try again.';
+  }
+
+  // ── Build ──────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: AppColors.background,
       body: Column(
         children: [
+          // ── Header ────────────────────────────────────────
           Container(
             decoration: const BoxDecoration(
               gradient: LinearGradient(
@@ -102,7 +169,8 @@ class _SignupScreenState extends State<SignupScreen> {
                           borderRadius: BorderRadius.circular(12),
                         ),
                         padding: const EdgeInsets.all(10),
-                        child: const Icon(Icons.chevron_left, color: Colors.white, size: 22),
+                        child: const Icon(Icons.chevron_left,
+                            color: Colors.white, size: 22),
                       ),
                     ),
                     const SizedBox(width: 16),
@@ -111,41 +179,50 @@ class _SignupScreenState extends State<SignupScreen> {
                       children: [
                         Text('Create Account',
                             style: GoogleFonts.nunito(
-                                color: Colors.white, fontSize: 20, fontWeight: FontWeight.w900)),
+                                color: Colors.white,
+                                fontSize: 20,
+                                fontWeight: FontWeight.w900)),
                         Text('Step $_step of 2',
                             style: GoogleFonts.nunito(
-                                color: Colors.white.withOpacity(0.6), fontSize: 12)),
+                                color: Colors.white.withOpacity(0.6),
+                                fontSize: 12)),
                       ],
                     ),
                   ],
                 ),
                 const SizedBox(height: 16),
+                // Progress bar
                 Row(children: [
                   Expanded(
-                      child: Container(
-                          height: 4,
-                          decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(2)))),
+                    child: Container(
+                      height: 4,
+                      decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(2))),
+                  ),
                   const SizedBox(width: 6),
                   Expanded(
-                      child: Container(
-                          height: 4,
-                          decoration: BoxDecoration(
-                              color: _step >= 2
-                                  ? Colors.white
-                                  : Colors.white.withOpacity(0.25),
-                              borderRadius: BorderRadius.circular(2)))),
+                    child: Container(
+                      height: 4,
+                      decoration: BoxDecoration(
+                          color: _step >= 2
+                              ? Colors.white
+                              : Colors.white.withOpacity(0.25),
+                          borderRadius: BorderRadius.circular(2))),
+                  ),
                 ]),
               ],
             ),
           ),
+
+          // ── Form ──────────────────────────────────────────
           Expanded(
             child: Container(
               decoration: const BoxDecoration(
                 color: AppColors.background,
                 borderRadius: BorderRadius.only(
-                    topLeft: Radius.circular(32), topRight: Radius.circular(32)),
+                    topLeft: Radius.circular(32),
+                    topRight: Radius.circular(32)),
               ),
               child: SingleChildScrollView(
                 padding: const EdgeInsets.all(24),
@@ -158,6 +235,7 @@ class _SignupScreenState extends State<SignupScreen> {
     );
   }
 
+  // ── Error banner ───────────────────────────────────────────
   Widget _errorBanner() {
     if (_error == null) return const SizedBox.shrink();
     return Padding(
@@ -173,183 +251,58 @@ class _SignupScreenState extends State<SignupScreen> {
           const Icon(Icons.error_outline, color: AppColors.danger, size: 18),
           const SizedBox(width: 8),
           Expanded(
-              child: Text(_error!,
-                  style: GoogleFonts.nunito(color: AppColors.danger, fontSize: 13))),
+            child: Text(_error!,
+                style: GoogleFonts.nunito(
+                    color: AppColors.danger, fontSize: 13)),
+          ),
         ]),
       ),
     );
   }
 
+  // ── Step 1 ─────────────────────────────────────────────────
   Widget _buildStep1() {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Text('Personal Information',
           style: GoogleFonts.nunito(
-              fontSize: 18, fontWeight: FontWeight.w900, color: AppColors.textDark)),
+              fontSize: 18,
+              fontWeight: FontWeight.w900,
+              color: AppColors.textDark)),
       const SizedBox(height: 4),
       Text('Tell us about yourself',
-          style: GoogleFonts.nunito(fontSize: 13, color: AppColors.textLight)),
+          style: GoogleFonts.nunito(
+              fontSize: 13, color: AppColors.textLight)),
       const SizedBox(height: 24),
       _errorBanner(),
-      _buildField('FULL NAME', _nameCtrl, 'Juan Dela Cruz', Icons.person_outline),
-      const SizedBox(height: 16),
-      _buildField('STUDENT ID', _idCtrl, '2024-00001', Icons.badge_outlined),
-      const SizedBox(height: 16),
-      _buildField('DEPARTMENT / COURSE', _deptCtrl, 'e.g. BSED, BSCS', Icons.school_outlined),
-      const SizedBox(height: 16),
-      // Year level picker
-      Text('YEAR LEVEL',
-          style: GoogleFonts.nunito(
-              fontSize: 12, fontWeight: FontWeight.w700,
-              color: AppColors.textMid, letterSpacing: 0.5)),
-      const SizedBox(height: 8),
-      Row(
-        children: List.generate(5, (i) {
-          final yr = i + 1;
-          final selected = _yearLevel == yr;
-          return Expanded(
-            child: GestureDetector(
-              onTap: () => setState(() => _yearLevel = yr),
-              child: Container(
-                margin: EdgeInsets.only(right: i < 4 ? 6 : 0),
-                padding: const EdgeInsets.symmetric(vertical: 10),
-                decoration: BoxDecoration(
-                  color: selected ? AppColors.primary : AppColors.background,
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(
-                      color: selected ? AppColors.primary : AppColors.border,
-                      width: 1.5),
-                ),
-                child: Center(
-                  child: Text('$yr',
-                      style: GoogleFonts.nunito(
-                          fontWeight: FontWeight.w800,
-                          color: selected ? Colors.white : AppColors.textMid,
-                          fontSize: 14)),
-                ),
-              ),
-            ),
-          );
-        }),
-      ),
-      const SizedBox(height: 24),
-      SizedBox(
-        width: double.infinity,
-        child: ElevatedButton(
-          onPressed: () {
-            if (_nameCtrl.text.isEmpty ||
-                _idCtrl.text.isEmpty ||
-                _deptCtrl.text.isEmpty) {
-              setState(() => _error = 'Please fill in all fields.');
-              return;
-            }
-            setState(() { _step = 2; _error = null; });
-          },
-          style: ElevatedButton.styleFrom(
-            backgroundColor: AppColors.primary,
-            foregroundColor: Colors.white,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            padding: const EdgeInsets.symmetric(vertical: 16),
-          ),
-          child: Text('Continue →',
-              style: GoogleFonts.nunito(fontSize: 16, fontWeight: FontWeight.w800)),
-        ),
-      ),
-      _buildLoginLink(),
-    ]);
-  }
 
-  Widget _buildStep2() {
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text('Account Security',
-          style: GoogleFonts.nunito(
-              fontSize: 18, fontWeight: FontWeight.w900, color: AppColors.textDark)),
-      const SizedBox(height: 4),
-      Text('Set up your login credentials',
-          style: GoogleFonts.nunito(fontSize: 13, color: AppColors.textLight)),
-      const SizedBox(height: 24),
-      _errorBanner(),
-      _buildField('STUDENT EMAIL', _emailCtrl, 'you@cvsu.edu.ph', Icons.mail_outline,
-          inputType: TextInputType.emailAddress),
-      const SizedBox(height: 16),
-      _buildField('PASSWORD', _passCtrl, 'Min. 8 characters', Icons.lock_outline,
-          obscure: true),
-      const SizedBox(height: 16),
-      _buildField('CONFIRM PASSWORD', _confirmCtrl, 'Re-enter password', Icons.lock_outline,
-          obscure: true),
-      const SizedBox(height: 16),
-      Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-            color: AppColors.primary.withOpacity(0.08),
-            borderRadius: BorderRadius.circular(12)),
-        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text('ℹ️', style: TextStyle(fontSize: 16)),
-          const SizedBox(width: 10),
-          Expanded(
-              child: Text(
-                  "By signing up, you agree to CvSU GADRC's Terms of Service and Privacy Policy.",
-                  style: GoogleFonts.nunito(
-                      fontSize: 12, color: AppColors.textMid, height: 1.5))),
-        ]),
-      ),
-      const SizedBox(height: 20),
-      SizedBox(
-        width: double.infinity,
-        child: ElevatedButton(
-          onPressed: _loading ? null : _handleSignup,
-          style: ElevatedButton.styleFrom(
-            backgroundColor: AppColors.primary,
-            foregroundColor: Colors.white,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            padding: const EdgeInsets.symmetric(vertical: 16),
-          ),
-          child: _loading
-              ? const SizedBox(
-                  height: 20,
-                  width: 20,
-                  child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5))
-              : Text('Create Account 🎉',
-                  style: GoogleFonts.nunito(fontSize: 16, fontWeight: FontWeight.w800)),
-        ),
-      ),
-      const SizedBox(height: 12),
-      SizedBox(
-        width: double.infinity,
-        child: OutlinedButton(
-          onPressed: () => setState(() { _step = 1; _error = null; }),
-          style: OutlinedButton.styleFrom(
-            padding: const EdgeInsets.symmetric(vertical: 14),
-            side: const BorderSide(color: AppColors.border, width: 1.5),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          ),
-          child: Text('← Back',
-              style: GoogleFonts.nunito(
-                  fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textMid)),
-        ),
-      ),
-      _buildLoginLink(),
-    ]);
-  }
-
-  Widget _buildField(String label, TextEditingController ctrl, String hint, IconData icon,
-      {bool obscure = false, TextInputType? inputType}) {
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(label,
-          style: GoogleFonts.nunito(
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-              color: AppColors.textMid,
-              letterSpacing: 0.5)),
+      _buildLabel('FULL NAME'),
       const SizedBox(height: 8),
-      TextField(
-        controller: ctrl,
-        obscureText: obscure,
-        keyboardType: inputType,
-        style: GoogleFonts.nunito(fontSize: 14, color: AppColors.textDark),
+      _buildTextField(
+        ctrl: _nameCtrl,
+        hint: 'Juan Dela Cruz',
+        icon: Icons.person_outline,
+      ),
+      const SizedBox(height: 16),
+
+      _buildLabel('STUDENT ID'),
+      const SizedBox(height: 8),
+      _buildTextField(
+        ctrl: _idCtrl,
+        hint: '2024-00001',
+        icon: Icons.badge_outlined,
+      ),
+      const SizedBox(height: 16),
+
+      // Department dropdown
+      _buildLabel('DEPARTMENT / COURSE'),
+      const SizedBox(height: 8),
+      DropdownButtonFormField<String>(
+        value: _selectedDepartment,
+        hint: Text('Select Department',
+            style: GoogleFonts.nunito(color: AppColors.textLight)),
         decoration: InputDecoration(
-          hintText: hint,
-          hintStyle: GoogleFonts.nunito(color: AppColors.textLight),
-          prefixIcon: Icon(icon, color: AppColors.textLight, size: 20),
+          prefixIcon: const Icon(Icons.school_outlined,
+              color: AppColors.textLight, size: 20),
           filled: true,
           fillColor: Colors.white,
           border: OutlineInputBorder(
@@ -360,12 +313,350 @@ class _SignupScreenState extends State<SignupScreen> {
               borderSide: const BorderSide(color: AppColors.border)),
           focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: AppColors.primary, width: 2)),
+              borderSide:
+                  const BorderSide(color: AppColors.primary, width: 2)),
         ),
+        items: kDepartments
+            .map((d) => DropdownMenuItem(
+                  value: d,
+                  child: Text(d, style: GoogleFonts.nunito(fontSize: 13)),
+                ))
+            .toList(),
+        onChanged: (v) => setState(() => _selectedDepartment = v),
+      ),
+      const SizedBox(height: 16),
+
+      // Year level picker
+      _buildLabel('YEAR LEVEL'),
+      const SizedBox(height: 8),
+      Row(
+        children: kYearLevels.map((yr) {
+          final selected = _selectedYearLevel == yr;
+          return Expanded(
+            child: GestureDetector(
+              onTap: () => setState(() => _selectedYearLevel = yr),
+              child: Container(
+                margin:
+                    EdgeInsets.only(right: yr < kYearLevels.last ? 6 : 0),
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                decoration: BoxDecoration(
+                  color: selected
+                      ? AppColors.primary
+                      : AppColors.background,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                      color: selected
+                          ? AppColors.primary
+                          : AppColors.border,
+                      width: 1.5),
+                ),
+                child: Center(
+                  child: Text('$yr',
+                      style: GoogleFonts.nunito(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 14,
+                          color: selected
+                              ? Colors.white
+                              : AppColors.textMid)),
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+      const SizedBox(height: 24),
+
+      SizedBox(
+        width: double.infinity,
+        child: ElevatedButton(
+          onPressed: () {
+            final err = _validateStep1();
+            if (err != null) {
+              setState(() => _error = err);
+              return;
+            }
+            setState(() { _step = 2; _error = null; });
+          },
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppColors.primary,
+            foregroundColor: Colors.white,
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16)),
+            padding: const EdgeInsets.symmetric(vertical: 16),
+          ),
+          child: Text('Continue →',
+              style: GoogleFonts.nunito(
+                  fontSize: 16, fontWeight: FontWeight.w800)),
+        ),
+      ),
+      _buildLoginLink(),
+    ]);
+  }
+
+  // ── Step 2 ─────────────────────────────────────────────────
+  Widget _buildStep2() {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text('Account Security',
+          style: GoogleFonts.nunito(
+              fontSize: 18,
+              fontWeight: FontWeight.w900,
+              color: AppColors.textDark)),
+      const SizedBox(height: 4),
+      Text('Set up your login credentials',
+          style: GoogleFonts.nunito(
+              fontSize: 13, color: AppColors.textLight)),
+      const SizedBox(height: 24),
+      _errorBanner(),
+
+      // Email
+      _buildLabel('STUDENT EMAIL'),
+      const SizedBox(height: 8),
+      _buildTextField(
+        ctrl: _emailCtrl,
+        hint: 'you@cvsu.edu.ph',
+        icon: Icons.mail_outline,
+        inputType: TextInputType.emailAddress,
+      ),
+      const SizedBox(height: 16),
+
+      // Password + strength bar
+      _buildLabel('PASSWORD'),
+      const SizedBox(height: 8),
+      TextField(
+        controller: _passCtrl,
+        obscureText: _obscurePass,
+        onChanged: (_) => setState(() {}), // triggers strength bar rebuild
+        style: GoogleFonts.nunito(fontSize: 14, color: AppColors.textDark),
+        decoration: InputDecoration(
+          hintText: 'Min. 8 characters, 1 uppercase, 1 number',
+          hintStyle: GoogleFonts.nunito(color: AppColors.textLight, fontSize: 12),
+          prefixIcon: const Icon(Icons.lock_outline,
+              color: AppColors.textLight, size: 20),
+          suffixIcon: IconButton(
+            icon: Icon(
+                _obscurePass
+                    ? Icons.visibility_off_outlined
+                    : Icons.visibility_outlined,
+                color: AppColors.textLight,
+                size: 20),
+            onPressed: () => setState(() => _obscurePass = !_obscurePass),
+          ),
+          filled: true,
+          fillColor: Colors.white,
+          border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: AppColors.border)),
+          enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: AppColors.border)),
+          focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide:
+                  const BorderSide(color: AppColors.primary, width: 2)),
+        ),
+      ),
+      _buildPasswordStrengthBar(_passCtrl.text),
+      const SizedBox(height: 16),
+
+      // Confirm password
+      _buildLabel('CONFIRM PASSWORD'),
+      const SizedBox(height: 8),
+      TextField(
+        controller: _confirmCtrl,
+        obscureText: _obscureConfirm,
+        style: GoogleFonts.nunito(fontSize: 14, color: AppColors.textDark),
+        decoration: InputDecoration(
+          hintText: 'Re-enter password',
+          hintStyle: GoogleFonts.nunito(color: AppColors.textLight),
+          prefixIcon: const Icon(Icons.lock_outline,
+              color: AppColors.textLight, size: 20),
+          suffixIcon: IconButton(
+            icon: Icon(
+                _obscureConfirm
+                    ? Icons.visibility_off_outlined
+                    : Icons.visibility_outlined,
+                color: AppColors.textLight,
+                size: 20),
+            onPressed: () =>
+                setState(() => _obscureConfirm = !_obscureConfirm),
+          ),
+          filled: true,
+          fillColor: Colors.white,
+          border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: AppColors.border)),
+          enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: AppColors.border)),
+          focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide:
+                  const BorderSide(color: AppColors.primary, width: 2)),
+        ),
+      ),
+      const SizedBox(height: 16),
+
+      // Terms notice
+      Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+            color: AppColors.primary.withOpacity(0.08),
+            borderRadius: BorderRadius.circular(12)),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('ℹ️', style: TextStyle(fontSize: 16)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              "By signing up, you agree to CvSU GADRC's Terms of Service and Privacy Policy.",
+              style: GoogleFonts.nunito(
+                  fontSize: 12, color: AppColors.textMid, height: 1.5),
+            ),
+          ),
+        ]),
+      ),
+      const SizedBox(height: 20),
+
+      // Create account button
+      SizedBox(
+        width: double.infinity,
+        child: ElevatedButton(
+          onPressed: _loading ? null : _handleSignup,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppColors.primary,
+            foregroundColor: Colors.white,
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16)),
+            padding: const EdgeInsets.symmetric(vertical: 16),
+          ),
+          child: _loading
+              ? const SizedBox(
+                  height: 20,
+                  width: 20,
+                  child: CircularProgressIndicator(
+                      color: Colors.white, strokeWidth: 2.5))
+              : Text('Create Account 🎉',
+                  style: GoogleFonts.nunito(
+                      fontSize: 16, fontWeight: FontWeight.w800)),
+        ),
+      ),
+      const SizedBox(height: 12),
+
+      // Back button
+      SizedBox(
+        width: double.infinity,
+        child: OutlinedButton(
+          onPressed: () => setState(() { _step = 1; _error = null; }),
+          style: OutlinedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            side: const BorderSide(color: AppColors.border, width: 1.5),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16)),
+          ),
+          child: Text('← Back',
+              style: GoogleFonts.nunito(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.textMid)),
+        ),
+      ),
+      _buildLoginLink(),
+    ]);
+  }
+
+  // ── Password strength bar ──────────────────────────────────
+  Widget _buildPasswordStrengthBar(String password) {
+    if (password.isEmpty) return const SizedBox(height: 6);
+    final score = AppValidators.passwordStrength(password);
+    final colors = [
+      Colors.transparent,
+      Colors.red,
+      Colors.orange,
+      Colors.lightGreen,
+      Colors.green,
+    ];
+    final labels = ['', 'Weak', 'Fair', 'Good', 'Strong'];
+
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const SizedBox(height: 8),
+      Row(
+        children: List.generate(4, (i) => Expanded(
+          child: Container(
+            height: 4,
+            margin: EdgeInsets.only(right: i < 3 ? 4 : 0),
+            decoration: BoxDecoration(
+              color: i < score ? colors[score] : AppColors.border,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+        )),
+      ),
+      const SizedBox(height: 4),
+      Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            score > 0 ? labels[score] : '',
+            style: GoogleFonts.nunito(
+                fontSize: 11,
+                color: score > 0 ? colors[score] : Colors.transparent,
+                fontWeight: FontWeight.w700),
+          ),
+          Text(
+            score < 4 ? 'Add uppercase & numbers for stronger password' : '✓ Strong password',
+            style: GoogleFonts.nunito(
+                fontSize: 10,
+                color: score == 4 ? Colors.green : AppColors.textLight),
+          ),
+        ],
       ),
     ]);
   }
 
+  // ── Reusable text field ────────────────────────────────────
+  Widget _buildTextField({
+    required TextEditingController ctrl,
+    required String hint,
+    required IconData icon,
+    bool obscure            = false,
+    TextInputType? inputType,
+    ValueChanged<String>? onChanged,
+  }) {
+    return TextField(
+      controller: ctrl,
+      obscureText: obscure,
+      keyboardType: inputType,
+      onChanged: onChanged,
+      style: GoogleFonts.nunito(fontSize: 14, color: AppColors.textDark),
+      decoration: InputDecoration(
+        hintText: hint,
+        hintStyle: GoogleFonts.nunito(color: AppColors.textLight),
+        prefixIcon: Icon(icon, color: AppColors.textLight, size: 20),
+        filled: true,
+        fillColor: Colors.white,
+        border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: AppColors.border)),
+        enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: AppColors.border)),
+        focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: AppColors.primary, width: 2)),
+      ),
+    );
+  }
+
+  // ── Label helper ───────────────────────────────────────────
+  Widget _buildLabel(String text) {
+    return Text(text,
+        style: GoogleFonts.nunito(
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+            color: AppColors.textMid,
+            letterSpacing: 0.5));
+  }
+
+  // ── Login link ─────────────────────────────────────────────
   Widget _buildLoginLink() {
     return Padding(
       padding: const EdgeInsets.only(top: 24),
@@ -374,13 +665,15 @@ class _SignupScreenState extends State<SignupScreen> {
           onTap: widget.onGoLogin,
           child: RichText(
             text: TextSpan(
-              style: GoogleFonts.nunito(color: AppColors.textLight, fontSize: 13),
+              style: GoogleFonts.nunito(
+                  color: AppColors.textLight, fontSize: 13),
               children: [
                 const TextSpan(text: 'Already have an account? '),
                 TextSpan(
                     text: 'Sign In',
                     style: GoogleFonts.nunito(
-                        color: AppColors.primary, fontWeight: FontWeight.w800)),
+                        color: AppColors.primary,
+                        fontWeight: FontWeight.w800)),
               ],
             ),
           ),
