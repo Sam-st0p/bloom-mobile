@@ -17,23 +17,49 @@ class LibraryScreen extends StatefulWidget {
 }
 
 class _LibraryScreenState extends State<LibraryScreen> {
-  List<ModuleModel> _modules = [];
-  Map<String, int> _progressMap = {};
-  bool _loading = true;
-  String _search = '';
+  List<ModuleModel> _modules   = [];
+  Map<String, int>  _progressMap = {};
+  bool   _loading     = true;
+  bool   _loadingMore = false;
+  bool   _hasMore     = true;
+  String _search      = '';
+  int    _page        = 0;
+  static const int _pageSize = 10;
+
   ModuleModel? _selectedModule;
   List<Map<String, dynamic>> _moduleFiles = [];
   bool _loadingFiles = false;
+
+  final _scrollController = ScrollController();
 
   @override
   void initState() {
     super.initState();
     _load();
+    _scrollController.addListener(_onScroll);
   }
 
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  // ── Infinite scroll trigger ────────────────────────────
+  void _onScroll() {
+    if (_scrollController.position.pixels >=
+            _scrollController.position.maxScrollExtent - 200 &&
+        !_loadingMore &&
+        _hasMore &&
+        _search.isEmpty) {
+      _loadMore();
+    }
+  }
+
+  // ── Initial load (page 0) ──────────────────────────────
   Future<void> _load() async {
     if (!mounted) return;
-    setState(() => _loading = true);
+    setState(() { _loading = true; _page = 0; _hasMore = true; });
     try {
       final userId = _supabase.auth.currentUser?.id;
 
@@ -41,7 +67,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
           .from('modules')
           .select('*, categories(name)')
           .eq('status', 'published')
-          .order('created_at', ascending: false);
+          .order('created_at', ascending: false)
+          .range(0, _pageSize - 1);
 
       Map<String, int> progressMap = {};
       if (userId != null) {
@@ -56,13 +83,15 @@ class _LibraryScreenState extends State<LibraryScreen> {
       }
 
       if (mounted) {
+        final list = (modulesData as List)
+            .map((m) => ModuleModel.fromMap(m,
+                progress: progressMap[m['id'].toString()] ?? 0))
+            .toList();
         setState(() {
           _progressMap = progressMap;
-          _modules = (modulesData as List)
-              .map((m) => ModuleModel.fromMap(m,
-                  progress: progressMap[m['id'].toString()] ?? 0))
-              .toList();
-          _loading = false;
+          _modules     = list;
+          _hasMore     = list.length == _pageSize;
+          _loading     = false;
         });
       }
     } catch (e) {
@@ -70,17 +99,50 @@ class _LibraryScreenState extends State<LibraryScreen> {
     }
   }
 
+  // ── Load next page ─────────────────────────────────────
+  Future<void> _loadMore() async {
+    if (_loadingMore || !_hasMore) return;
+    setState(() => _loadingMore = true);
+    try {
+      final nextPage = _page + 1;
+      final from     = nextPage * _pageSize;
+      final to       = from + _pageSize - 1;
+
+      final modulesData = await _supabase
+          .from('modules')
+          .select('*, categories(name)')
+          .eq('status', 'published')
+          .order('created_at', ascending: false)
+          .range(from, to);
+
+      if (mounted) {
+        final list = (modulesData as List)
+            .map((m) => ModuleModel.fromMap(m,
+                progress: _progressMap[m['id'].toString()] ?? 0))
+            .toList();
+        setState(() {
+          _modules.addAll(list);
+          _page        = nextPage;
+          _hasMore     = list.length == _pageSize;
+          _loadingMore = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loadingMore = false);
+    }
+  }
+
+  // ── Open module detail ─────────────────────────────────
   Future<void> _openModule(ModuleModel module) async {
     setState(() {
       _selectedModule = module;
-      _loadingFiles = true;
-      _moduleFiles = [];
+      _loadingFiles   = true;
+      _moduleFiles    = [];
     });
 
-    // Log activity
     await ActivityService.log(
       activityType: 'module_opened',
-      referenceId: module.id,
+      referenceId:  module.id,
       referenceType: 'module',
       metadata: {'title': module.title},
     );
@@ -93,7 +155,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
           .order('sort_order');
       if (mounted) {
         setState(() {
-          _moduleFiles = List<Map<String, dynamic>>.from(files as List);
+          _moduleFiles  = List<Map<String, dynamic>>.from(files as List);
           _loadingFiles = false;
         });
       }
@@ -102,6 +164,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     }
   }
 
+  // ── Open file ──────────────────────────────────────────
   Future<void> _openFile(Map<String, dynamic> file) async {
     final url = file['file_url']?.toString();
     if (url == null || url.isEmpty) {
@@ -113,10 +176,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
       return;
     }
 
-    // Log activity
     await ActivityService.log(
-      activityType: 'file_opened',
-      referenceId: file['id']?.toString(),
+      activityType:  'file_opened',
+      referenceId:   file['id']?.toString(),
       referenceType: 'module_file',
       metadata: {
         'file_name': file['file_name'],
@@ -124,7 +186,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
       },
     );
 
-    // Update progress when a file is opened
     if (_selectedModule != null) {
       final currentProgress = _progressMap[_selectedModule!.id] ?? 0;
       if (currentProgress < 100) {
@@ -135,12 +196,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
     if (!mounted) return;
 
-    // Open PDF in-app viewer
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => PdfViewerScreen(
-          url: url,
+          url:   url,
           title: file['file_name'] ?? 'Document',
         ),
       ),
@@ -152,16 +212,17 @@ class _LibraryScreenState extends State<LibraryScreen> {
     if (userId == null) return;
     try {
       await _supabase.from('module_progress').upsert({
-        'user_id': userId,
-        'module_id': moduleId,
+        'user_id':        userId,
+        'module_id':      moduleId,
         'progress_percent': pct,
-        'status': pct == 100 ? 'completed' : 'in_progress',
+        'status':         pct == 100 ? 'completed' : 'in_progress',
         'last_accessed_at': DateTime.now().toIso8601String(),
       }, onConflict: 'user_id,module_id');
       await _load();
     } catch (_) {}
   }
 
+  // ── Filtered list (search uses all loaded modules) ─────
   List<ModuleModel> get _filtered {
     if (_search.isEmpty) return _modules;
     final q = _search.toLowerCase();
@@ -176,9 +237,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
     return _buildLibrary();
   }
 
+  // ── Library list view ──────────────────────────────────
   Widget _buildLibrary() {
     return Column(
       children: [
+        // Header + search
         Container(
           color: Colors.white,
           padding: const EdgeInsets.fromLTRB(20, 20, 20, 14),
@@ -193,11 +256,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
               const SizedBox(height: 12),
               TextField(
                 onChanged: (v) => setState(() => _search = v),
-                style: GoogleFonts.nunito(fontSize: 14, color: AppColors.textDark),
+                style: GoogleFonts.nunito(
+                    fontSize: 14, color: AppColors.textDark),
                 decoration: InputDecoration(
                   hintText: 'Search modules...',
-                  hintStyle: GoogleFonts.nunito(color: AppColors.textLight),
-                  prefixIcon: const Icon(Icons.search, color: AppColors.textLight, size: 20),
+                  hintStyle:
+                      GoogleFonts.nunito(color: AppColors.textLight),
+                  prefixIcon: const Icon(Icons.search,
+                      color: AppColors.textLight, size: 20),
                   filled: true,
                   fillColor: AppColors.background,
                   border: OutlineInputBorder(
@@ -205,16 +271,22 @@ class _LibraryScreenState extends State<LibraryScreen> {
                       borderSide: BorderSide.none),
                   enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(14),
-                      borderSide: const BorderSide(color: AppColors.border, width: 1.5)),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      borderSide: const BorderSide(
+                          color: AppColors.border, width: 1.5)),
+                  contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 12),
                 ),
               ),
             ],
           ),
         ),
+
+        // Module list
         Expanded(
           child: _loading
-              ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
+              ? const Center(
+                  child: CircularProgressIndicator(
+                      color: AppColors.primary))
               : RefreshIndicator(
                   onRefresh: _load,
                   child: _filtered.isEmpty
@@ -223,23 +295,57 @@ class _LibraryScreenState extends State<LibraryScreen> {
                           Center(
                             child: Column(children: [
                               const Icon(Icons.menu_book_outlined,
-                                  size: 48, color: AppColors.textLight),
+                                  size: 48,
+                                  color: AppColors.textLight),
                               const SizedBox(height: 12),
                               Text('No modules found',
                                   style: GoogleFonts.nunito(
                                       color: AppColors.textLight,
                                       fontWeight: FontWeight.w700)),
                             ]),
-                          )
+                          ),
                         ])
                       : ListView.separated(
+                          controller: _scrollController,
                           padding: const EdgeInsets.all(16),
-                          itemCount: _filtered.length,
-                          separatorBuilder: (_, __) => const SizedBox(height: 12),
-                          itemBuilder: (_, i) => _ModuleCard(
-                            module: _filtered[i],
-                            onTap: () => _openModule(_filtered[i]),
-                          ),
+                          // +1 for the loading indicator at the bottom
+                          itemCount: _filtered.length +
+                              (_loadingMore ? 1 : 0) +
+                              (!_hasMore && _modules.isNotEmpty && _search.isEmpty ? 1 : 0),
+                          separatorBuilder: (_, __) =>
+                              const SizedBox(height: 12),
+                          itemBuilder: (_, i) {
+                            // Loading more indicator
+                            if (i == _filtered.length && _loadingMore) {
+                              return const Padding(
+                                padding: EdgeInsets.symmetric(vertical: 16),
+                                child: Center(
+                                  child: CircularProgressIndicator(
+                                      color: AppColors.primary,
+                                      strokeWidth: 2),
+                                ),
+                              );
+                            }
+                            // End of list message
+                            if (i == _filtered.length && !_hasMore) {
+                              return Padding(
+                                padding: const EdgeInsets.symmetric(
+                                    vertical: 16),
+                                child: Center(
+                                  child: Text(
+                                    'All ${_modules.length} modules loaded',
+                                    style: GoogleFonts.nunito(
+                                        fontSize: 12,
+                                        color: AppColors.textLight),
+                                  ),
+                                ),
+                              );
+                            }
+                            return _ModuleCard(
+                              module: _filtered[i],
+                              onTap: () => _openModule(_filtered[i]),
+                            );
+                          },
                         ),
                 ),
         ),
@@ -247,6 +353,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     );
   }
 
+  // ── Module detail view ─────────────────────────────────
   Widget _buildModuleDetail(ModuleModel module) {
     final progress = _progressMap[module.id] ?? 0;
 
@@ -267,8 +374,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
             children: [
               Row(children: [
                 IconButton(
-                  onPressed: () => setState(() => _selectedModule = null),
-                  icon: const Icon(Icons.chevron_left, color: Colors.white),
+                  onPressed: () =>
+                      setState(() => _selectedModule = null),
+                  icon: const Icon(Icons.chevron_left,
+                      color: Colors.white),
                 ),
                 Expanded(
                   child: Text(module.title,
@@ -290,7 +399,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
                           color: Colors.white.withOpacity(0.3)),
                       const SizedBox(width: 8),
                       BadgeChip(
-                          label: progress == 100 ? '✅ Completed' : '$progress%',
+                          label: progress == 100
+                              ? '✅ Completed'
+                              : '$progress%',
                           color: Colors.white.withOpacity(0.3)),
                     ]),
                     const SizedBox(height: 10),
@@ -298,9 +409,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
                       borderRadius: BorderRadius.circular(6),
                       child: LinearProgressIndicator(
                         value: progress / 100,
-                        backgroundColor: Colors.white.withOpacity(0.2),
+                        backgroundColor:
+                            Colors.white.withOpacity(0.2),
                         valueColor:
-                            const AlwaysStoppedAnimation<Color>(Colors.white),
+                            const AlwaysStoppedAnimation<Color>(
+                                Colors.white),
                         minHeight: 6,
                       ),
                     ),
@@ -316,8 +429,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
           child: ListView(
             padding: const EdgeInsets.all(16),
             children: [
-              // Module description
-              if (module.description != null && module.description!.isNotEmpty)
+              // Description
+              if (module.description != null &&
+                  module.description!.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 14),
                   child: AppCard(
@@ -340,13 +454,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   ),
                 ),
 
-              // PDF Files section
+              // Files
               AppCard(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      mainAxisAlignment:
+                          MainAxisAlignment.spaceBetween,
                       children: [
                         Text('📄 Module Files',
                             style: GoogleFonts.nunito(
@@ -354,9 +469,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
                                 fontSize: 14,
                                 color: AppColors.textDark)),
                         if (_moduleFiles.isNotEmpty)
-                          Text('${_moduleFiles.length} file${_moduleFiles.length > 1 ? 's' : ''}',
+                          Text(
+                              '${_moduleFiles.length} file${_moduleFiles.length > 1 ? 's' : ''}',
                               style: GoogleFonts.nunito(
-                                  fontSize: 12, color: AppColors.textLight)),
+                                  fontSize: 12,
+                                  color: AppColors.textLight)),
                       ],
                     ),
                     const SizedBox(height: 12),
@@ -371,7 +488,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
                         const SizedBox(height: 8),
                         Text('No files uploaded yet.',
                             style: GoogleFonts.nunito(
-                                color: AppColors.textLight, fontSize: 13)),
+                                color: AppColors.textLight,
+                                fontSize: 13)),
                       ])
                     else
                       ..._moduleFiles.map((f) => _FileTile(
@@ -393,7 +511,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                       context,
                       MaterialPageRoute(
                         builder: (_) => AssessmentScreen(
-                          moduleId: module.id,
+                          moduleId:    module.id,
                           moduleTitle: module.title,
                           onComplete: () {
                             Navigator.pop(context);
@@ -411,10 +529,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
                           fontSize: 15,
                           color: AppColors.primary)),
                   style: OutlinedButton.styleFrom(
-                    side: const BorderSide(color: AppColors.primary, width: 1.5),
+                    side: const BorderSide(
+                        color: AppColors.primary, width: 1.5),
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(14)),
-                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    padding:
+                        const EdgeInsets.symmetric(vertical: 14),
                   ),
                 ),
               ),
@@ -428,8 +548,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 }
 
-// ── Module Card ────────────────────────────────────────────────────────────────
-
+// ── Module Card ───────────────────────────────────────────
 class _ModuleCard extends StatelessWidget {
   final ModuleModel module;
   final VoidCallback onTap;
@@ -448,7 +567,8 @@ class _ModuleCard extends StatelessWidget {
               decoration: BoxDecoration(
                   color: color.withOpacity(0.15),
                   borderRadius: BorderRadius.circular(14)),
-              child: Icon(Icons.menu_book_outlined, color: color, size: 24),
+              child:
+                  Icon(Icons.menu_book_outlined, color: color, size: 24),
             ),
             const SizedBox(width: 14),
             Expanded(
@@ -493,8 +613,7 @@ class _ModuleCard extends StatelessWidget {
   }
 }
 
-// ── File Tile ──────────────────────────────────────────────────────────────────
-
+// ── File Tile ─────────────────────────────────────────────
 class _FileTile extends StatelessWidget {
   final Map<String, dynamic> file;
   final VoidCallback onTap;
@@ -507,8 +626,9 @@ class _FileTile extends StatelessWidget {
       return Icons.picture_as_pdf_outlined;
     if (type.contains('video') || name.endsWith('.mp4'))
       return Icons.play_circle_outline;
-    if (type.contains('image') || name.endsWith('.png') || name.endsWith('.jpg'))
-      return Icons.image_outlined;
+    if (type.contains('image') ||
+        name.endsWith('.png') ||
+        name.endsWith('.jpg')) return Icons.image_outlined;
     if (name.endsWith('.pptx') || name.endsWith('.ppt'))
       return Icons.slideshow_outlined;
     if (name.endsWith('.docx') || name.endsWith('.doc'))
@@ -519,17 +639,21 @@ class _FileTile extends StatelessWidget {
   Color get _iconColor {
     final type = (file['file_type'] ?? '').toString().toLowerCase();
     final name = (file['file_name'] ?? '').toString().toLowerCase();
-    if (type.contains('pdf') || name.endsWith('.pdf')) return Colors.red.shade400;
-    if (type.contains('video') || name.endsWith('.mp4')) return Colors.blue.shade400;
-    if (name.endsWith('.pptx') || name.endsWith('.ppt')) return Colors.orange.shade400;
-    if (name.endsWith('.docx') || name.endsWith('.doc')) return Colors.blue.shade600;
+    if (type.contains('pdf') || name.endsWith('.pdf'))
+      return Colors.red.shade400;
+    if (type.contains('video') || name.endsWith('.mp4'))
+      return Colors.blue.shade400;
+    if (name.endsWith('.pptx') || name.endsWith('.ppt'))
+      return Colors.orange.shade400;
+    if (name.endsWith('.docx') || name.endsWith('.doc'))
+      return Colors.blue.shade600;
     return AppColors.primary;
   }
 
   String get _fileSize {
     final kb = file['file_size_kb'];
     if (kb == null) return '';
-    if (kb < 1024) return '${kb} KB';
+    if (kb < 1024) return '$kb KB';
     return '${(kb / 1024).toStringAsFixed(1)} MB';
   }
 
@@ -570,12 +694,14 @@ class _FileTile extends StatelessWidget {
                   if (_fileSize.isNotEmpty)
                     Text(_fileSize,
                         style: GoogleFonts.nunito(
-                            fontSize: 11, color: AppColors.textLight)),
+                            fontSize: 11,
+                            color: AppColors.textLight)),
                 ],
               ),
             ),
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 10, vertical: 6),
               decoration: BoxDecoration(
                 color: AppColors.primary.withOpacity(0.1),
                 borderRadius: BorderRadius.circular(8),
