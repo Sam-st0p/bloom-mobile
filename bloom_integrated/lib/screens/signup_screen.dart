@@ -27,11 +27,12 @@ class _SignupScreenState extends State<SignupScreen> {
   bool    _loading = false;
   String? _error;
 
-  final _nameCtrl    = TextEditingController();
-  final _idCtrl      = TextEditingController();
-  final _emailCtrl   = TextEditingController();
-  final _passCtrl    = TextEditingController();
-  final _confirmCtrl = TextEditingController();
+  final _firstNameCtrl = TextEditingController();
+  final _lastNameCtrl  = TextEditingController();
+  final _idCtrl        = TextEditingController();
+  final _emailCtrl     = TextEditingController();
+  final _passCtrl      = TextEditingController();
+  final _confirmCtrl   = TextEditingController();
 
   String? _selectedDepartment;
   int     _selectedYearLevel = 1;
@@ -42,7 +43,8 @@ class _SignupScreenState extends State<SignupScreen> {
 
   @override
   void dispose() {
-    _nameCtrl.dispose();
+    _firstNameCtrl.dispose();
+    _lastNameCtrl.dispose();
     _idCtrl.dispose();
     _emailCtrl.dispose();
     _passCtrl.dispose();
@@ -52,11 +54,15 @@ class _SignupScreenState extends State<SignupScreen> {
 
   // ── Step 1 validation ──────────────────────────────────────
   String? _validateStep1() {
-    final name = _nameCtrl.text.trim();
-    final id   = _idCtrl.text.trim();
+    final firstName = _firstNameCtrl.text.trim();
+    final lastName  = _lastNameCtrl.text.trim();
+    final id        = _idCtrl.text.trim();
 
-    if (!isValidFullName(name)) {
-      return 'Please enter your full name (first and last name).';
+    if (firstName.isEmpty) {
+      return 'Please enter your First Name.';
+    }
+    if (lastName.isEmpty) {
+      return 'Please enter your Last Name.';
     }
     if (id.isEmpty) {
       return 'Student ID is required.';
@@ -98,7 +104,8 @@ class _SignupScreenState extends State<SignupScreen> {
 
     setState(() { _loading = true; _error = null; });
 
-    final normalizedName = formatFullName(_nameCtrl.text);
+    final normalizedName = formatFullName(
+        '${_firstNameCtrl.text.trim()} ${_lastNameCtrl.text.trim()}');
     final normalizedId   = formatStudentId(_idCtrl.text);
 
     final error = await AuthService.signUp(
@@ -275,12 +282,27 @@ class _SignupScreenState extends State<SignupScreen> {
       const SizedBox(height: 24),
       _errorBanner(),
 
-      _buildLabel('FULL NAME'),
+      // ── First & Last Name (side by side) ──────────────────
+      _buildLabel('NAME'),
       const SizedBox(height: 8),
-      _buildTextField(
-        ctrl: _nameCtrl,
-        hint: 'Juan Dela Cruz',
-        icon: Icons.person_outline,
+      Row(
+        children: [
+          Expanded(
+            child: _buildTextField(
+              ctrl: _firstNameCtrl,
+              hint: 'First name',
+              icon: Icons.person_outline,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: _buildTextField(
+              ctrl: _lastNameCtrl,
+              hint: 'Last name',
+              icon: Icons.person_outline,
+            ),
+          ),
+        ],
       ),
       const SizedBox(height: 16),
 
