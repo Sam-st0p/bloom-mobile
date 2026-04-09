@@ -3,10 +3,12 @@
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../theme/app_theme.dart';
 import '../services/auth_service.dart';
 import '../utils/input_formatters.dart';
 import '../utils/validators.dart';
+import 'otp_screen.dart';
 
 class SignupScreen extends StatefulWidget {
   final VoidCallback onGoLogin;
@@ -26,6 +28,10 @@ class _SignupScreenState extends State<SignupScreen> {
   int     _step    = 1;
   bool    _loading = false;
   String? _error;
+  bool    _showOtp       = false;
+  String  _email         = '';
+  String  _normalizedName = '';
+  String  _normalizedId   = '';
 
   final _firstNameCtrl = TextEditingController();
   final _lastNameCtrl  = TextEditingController();
@@ -37,7 +43,6 @@ class _SignupScreenState extends State<SignupScreen> {
   String? _selectedDepartment;
   int     _selectedYearLevel = 1;
 
-  // Track password visibility separately for each field
   bool _obscurePass    = true;
   bool _obscureConfirm = true;
 
@@ -52,21 +57,15 @@ class _SignupScreenState extends State<SignupScreen> {
     super.dispose();
   }
 
-  // ── Step 1 validation ──────────────────────────────────────
+  // ── Step 1 validation ──────────────────────────────────
   String? _validateStep1() {
     final firstName = _firstNameCtrl.text.trim();
     final lastName  = _lastNameCtrl.text.trim();
     final id        = _idCtrl.text.trim();
 
-    if (firstName.isEmpty) {
-      return 'Please enter your First Name.';
-    }
-    if (lastName.isEmpty) {
-      return 'Please enter your Last Name.';
-    }
-    if (id.isEmpty) {
-      return 'Student ID is required.';
-    }
+    if (firstName.isEmpty) return 'Please enter your First Name.';
+    if (lastName.isEmpty)  return 'Please enter your Last Name.';
+    if (id.isEmpty)        return 'Student ID is required.';
     if (!isValidStudentId(formatStudentId(id))) {
       return 'Invalid student ID format. Example: 2023-12345';
     }
@@ -76,26 +75,19 @@ class _SignupScreenState extends State<SignupScreen> {
     return null;
   }
 
-  // ── Step 2 validation ──────────────────────────────────────
+  // ── Step 2 validation ──────────────────────────────────
   String? _validateStep2() {
     final emailError = AppValidators.email(_emailCtrl.text);
     if (emailError != null) return emailError;
-
     final passError = AppValidators.password(_passCtrl.text);
     if (passError != null) return passError;
-
-    if (_confirmCtrl.text.isEmpty) {
-      return 'Please confirm your password.';
-    }
-    if (_passCtrl.text != _confirmCtrl.text) {
-      return 'Passwords do not match.';
-    }
+    if (_confirmCtrl.text.isEmpty) return 'Please confirm your password.';
+    if (_passCtrl.text != _confirmCtrl.text) return 'Passwords do not match.';
     return null;
   }
 
-  // ── Signup handler ─────────────────────────────────────────
+  // ── Signup handler — creates account then shows OTP ────
   Future<void> _handleSignup() async {
-    // Validate step 2 before submitting
     final validationError = _validateStep2();
     if (validationError != null) {
       setState(() => _error = validationError);
@@ -106,10 +98,11 @@ class _SignupScreenState extends State<SignupScreen> {
 
     final normalizedName = formatFullName(
         '${_firstNameCtrl.text.trim()} ${_lastNameCtrl.text.trim()}');
-    final normalizedId   = formatStudentId(_idCtrl.text);
+    final normalizedId = formatStudentId(_idCtrl.text);
+    final email        = AppValidators.sanitize(_emailCtrl.text).toLowerCase();
 
     final error = await AuthService.signUp(
-      email:      AppValidators.sanitize(_emailCtrl.text).toLowerCase(),
+      email:      email,
       password:   _passCtrl.text,
       fullName:   normalizedName,
       studentId:  normalizedId,
@@ -122,37 +115,55 @@ class _SignupScreenState extends State<SignupScreen> {
       if (error != null) {
         setState(() => _error = _friendlySignupError(error));
       } else {
-        widget.onSignup();
+        // Account created — show OTP screen
+        setState(() {
+          _email          = email;
+          _normalizedName = normalizedName;
+          _normalizedId   = normalizedId;
+          _showOtp        = true;
+        });
       }
     }
   }
 
-  // ── Friendly signup error mapper ───────────────────────────
+  // ── Friendly error mapper ──────────────────────────────
   String _friendlySignupError(String raw) {
     final r = raw.toLowerCase();
     if (r.contains('already registered') || r.contains('already exists')) {
       return 'An account with this email already exists. Try signing in.';
     }
-    if (r.contains('invalid email')) {
-      return 'Please enter a valid email address.';
-    }
-    if (r.contains('password')) {
-      return 'Password does not meet the requirements.';
-    }
+    if (r.contains('invalid email')) return 'Please enter a valid email address.';
+    if (r.contains('password'))      return 'Password does not meet the requirements.';
     if (r.contains('network') || r.contains('connection')) {
       return 'No internet connection. Please check your network.';
     }
     return 'Sign up failed. Please try again.';
   }
 
-  // ── Build ──────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
+    // Show OTP screen after successful account creation
+    if (_showOtp) {
+      return OtpScreen(
+        email:      _email,
+        type:       'signup',
+        onVerified: widget.onSignup,
+        fullName:   _normalizedName,
+        studentId:  _normalizedId,
+        department: _selectedDepartment,
+        yearLevel:  _selectedYearLevel,
+        onBack: () => setState(() {
+          _showOtp = false;
+          _step    = 2;
+        }),
+      );
+    }
+
     return Scaffold(
       backgroundColor: AppColors.background,
       body: Column(
         children: [
-          // ── Header ────────────────────────────────────────
+          // ── Header ────────────────────────────────────
           Container(
             decoration: const BoxDecoration(
               gradient: LinearGradient(
@@ -198,31 +209,26 @@ class _SignupScreenState extends State<SignupScreen> {
                   ],
                 ),
                 const SizedBox(height: 16),
-                // Progress bar
                 Row(children: [
-                  Expanded(
-                    child: Container(
-                      height: 4,
-                      decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(2))),
-                  ),
+                  Expanded(child: Container(
+                    height: 4,
+                    decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(2)))),
                   const SizedBox(width: 6),
-                  Expanded(
-                    child: Container(
-                      height: 4,
-                      decoration: BoxDecoration(
-                          color: _step >= 2
-                              ? Colors.white
-                              : Colors.white.withOpacity(0.25),
-                          borderRadius: BorderRadius.circular(2))),
-                  ),
+                  Expanded(child: Container(
+                    height: 4,
+                    decoration: BoxDecoration(
+                        color: _step >= 2
+                            ? Colors.white
+                            : Colors.white.withOpacity(0.25),
+                        borderRadius: BorderRadius.circular(2)))),
                 ]),
               ],
             ),
           ),
 
-          // ── Form ──────────────────────────────────────────
+          // ── Form ──────────────────────────────────────
           Expanded(
             child: Container(
               decoration: const BoxDecoration(
@@ -242,7 +248,7 @@ class _SignupScreenState extends State<SignupScreen> {
     );
   }
 
-  // ── Error banner ───────────────────────────────────────────
+  // ── Error banner ───────────────────────────────────────
   Widget _errorBanner() {
     if (_error == null) return const SizedBox.shrink();
     return Padding(
@@ -257,17 +263,15 @@ class _SignupScreenState extends State<SignupScreen> {
         child: Row(children: [
           const Icon(Icons.error_outline, color: AppColors.danger, size: 18),
           const SizedBox(width: 8),
-          Expanded(
-            child: Text(_error!,
-                style: GoogleFonts.nunito(
-                    color: AppColors.danger, fontSize: 13)),
-          ),
+          Expanded(child: Text(_error!,
+              style: GoogleFonts.nunito(
+                  color: AppColors.danger, fontSize: 13))),
         ]),
       ),
     );
   }
 
-  // ── Step 1 ─────────────────────────────────────────────────
+  // ── Step 1 ─────────────────────────────────────────────
   Widget _buildStep1() {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Text('Personal Information',
@@ -277,45 +281,30 @@ class _SignupScreenState extends State<SignupScreen> {
               color: AppColors.textDark)),
       const SizedBox(height: 4),
       Text('Tell us about yourself',
-          style: GoogleFonts.nunito(
-              fontSize: 13, color: AppColors.textLight)),
+          style: GoogleFonts.nunito(fontSize: 13, color: AppColors.textLight)),
       const SizedBox(height: 24),
       _errorBanner(),
 
-      // ── First & Last Name (side by side) ──────────────────
       _buildLabel('NAME'),
       const SizedBox(height: 8),
-      Row(
-        children: [
-          Expanded(
-            child: _buildTextField(
-              ctrl: _firstNameCtrl,
-              hint: 'First name',
-              icon: Icons.person_outline,
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: _buildTextField(
-              ctrl: _lastNameCtrl,
-              hint: 'Last name',
-              icon: Icons.person_outline,
-            ),
-          ),
-        ],
-      ),
+      Row(children: [
+        Expanded(child: _buildTextField(
+          ctrl: _firstNameCtrl, hint: 'First name',
+          icon: Icons.person_outline)),
+        const SizedBox(width: 10),
+        Expanded(child: _buildTextField(
+          ctrl: _lastNameCtrl, hint: 'Last name',
+          icon: Icons.person_outline)),
+      ]),
       const SizedBox(height: 16),
 
       _buildLabel('STUDENT ID'),
       const SizedBox(height: 8),
       _buildTextField(
-        ctrl: _idCtrl,
-        hint: '2024-00001',
-        icon: Icons.badge_outlined,
-      ),
+          ctrl: _idCtrl, hint: '2024-00001',
+          icon: Icons.badge_outlined),
       const SizedBox(height: 16),
 
-      // Department dropdown
       _buildLabel('DEPARTMENT / COURSE'),
       const SizedBox(height: 8),
       DropdownButtonFormField<String>(
@@ -325,8 +314,7 @@ class _SignupScreenState extends State<SignupScreen> {
         decoration: InputDecoration(
           prefixIcon: const Icon(Icons.school_outlined,
               color: AppColors.textLight, size: 20),
-          filled: true,
-          fillColor: Colors.white,
+          filled: true, fillColor: Colors.white,
           border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
               borderSide: const BorderSide(color: AppColors.border)),
@@ -335,57 +323,37 @@ class _SignupScreenState extends State<SignupScreen> {
               borderSide: const BorderSide(color: AppColors.border)),
           focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
-              borderSide:
-                  const BorderSide(color: AppColors.primary, width: 2)),
+              borderSide: const BorderSide(color: AppColors.primary, width: 2)),
         ),
-        items: kDepartments
-            .map((d) => DropdownMenuItem(
-                  value: d,
-                  child: Text(d, style: GoogleFonts.nunito(fontSize: 13)),
-                ))
-            .toList(),
+        items: kDepartments.map((d) => DropdownMenuItem(
+            value: d,
+            child: Text(d, style: GoogleFonts.nunito(fontSize: 13)))).toList(),
         onChanged: (v) => setState(() => _selectedDepartment = v),
       ),
       const SizedBox(height: 16),
 
-      // Year level picker
       _buildLabel('YEAR LEVEL'),
       const SizedBox(height: 8),
-      Row(
-        children: kYearLevels.map((yr) {
-          final selected = _selectedYearLevel == yr;
-          return Expanded(
-            child: GestureDetector(
-              onTap: () => setState(() => _selectedYearLevel = yr),
-              child: Container(
-                margin:
-                    EdgeInsets.only(right: yr < kYearLevels.last ? 6 : 0),
-                padding: const EdgeInsets.symmetric(vertical: 10),
-                decoration: BoxDecoration(
-                  color: selected
-                      ? AppColors.primary
-                      : AppColors.background,
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(
-                      color: selected
-                          ? AppColors.primary
-                          : AppColors.border,
-                      width: 1.5),
-                ),
-                child: Center(
-                  child: Text('$yr',
-                      style: GoogleFonts.nunito(
-                          fontWeight: FontWeight.w800,
-                          fontSize: 14,
-                          color: selected
-                              ? Colors.white
-                              : AppColors.textMid)),
-                ),
-              ),
-            ),
-          );
-        }).toList(),
-      ),
+      Row(children: kYearLevels.map((yr) {
+        final selected = _selectedYearLevel == yr;
+        return Expanded(child: GestureDetector(
+          onTap: () => setState(() => _selectedYearLevel = yr),
+          child: Container(
+            margin: EdgeInsets.only(right: yr < kYearLevels.last ? 6 : 0),
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            decoration: BoxDecoration(
+              color: selected ? AppColors.primary : AppColors.background,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                  color: selected ? AppColors.primary : AppColors.border,
+                  width: 1.5)),
+            child: Center(child: Text('$yr',
+                style: GoogleFonts.nunito(
+                    fontWeight: FontWeight.w800, fontSize: 14,
+                    color: selected ? Colors.white : AppColors.textMid))),
+          ),
+        ));
+      }).toList()),
       const SizedBox(height: 24),
 
       SizedBox(
@@ -393,10 +361,7 @@ class _SignupScreenState extends State<SignupScreen> {
         child: ElevatedButton(
           onPressed: () {
             final err = _validateStep1();
-            if (err != null) {
-              setState(() => _error = err);
-              return;
-            }
+            if (err != null) { setState(() => _error = err); return; }
             setState(() { _step = 2; _error = null; });
           },
           style: ElevatedButton.styleFrom(
@@ -404,8 +369,7 @@ class _SignupScreenState extends State<SignupScreen> {
             foregroundColor: Colors.white,
             shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(16)),
-            padding: const EdgeInsets.symmetric(vertical: 16),
-          ),
+            padding: const EdgeInsets.symmetric(vertical: 16)),
           child: Text('Continue →',
               style: GoogleFonts.nunito(
                   fontSize: 16, fontWeight: FontWeight.w800)),
@@ -415,43 +379,38 @@ class _SignupScreenState extends State<SignupScreen> {
     ]);
   }
 
-  // ── Step 2 ─────────────────────────────────────────────────
+  // ── Step 2 ─────────────────────────────────────────────
   Widget _buildStep2() {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Text('Account Security',
           style: GoogleFonts.nunito(
-              fontSize: 18,
-              fontWeight: FontWeight.w900,
+              fontSize: 18, fontWeight: FontWeight.w900,
               color: AppColors.textDark)),
       const SizedBox(height: 4),
       Text('Set up your login credentials',
-          style: GoogleFonts.nunito(
-              fontSize: 13, color: AppColors.textLight)),
+          style: GoogleFonts.nunito(fontSize: 13, color: AppColors.textLight)),
       const SizedBox(height: 24),
       _errorBanner(),
 
-      // Email
       _buildLabel('STUDENT EMAIL'),
       const SizedBox(height: 8),
       _buildTextField(
-        ctrl: _emailCtrl,
-        hint: 'you@cvsu.edu.ph',
-        icon: Icons.mail_outline,
-        inputType: TextInputType.emailAddress,
-      ),
+          ctrl: _emailCtrl, hint: 'you@cvsu.edu.ph',
+          icon: Icons.mail_outline,
+          inputType: TextInputType.emailAddress),
       const SizedBox(height: 16),
 
-      // Password + strength bar
       _buildLabel('PASSWORD'),
       const SizedBox(height: 8),
       TextField(
         controller: _passCtrl,
         obscureText: _obscurePass,
-        onChanged: (_) => setState(() {}), // triggers strength bar rebuild
+        onChanged: (_) => setState(() {}),
         style: GoogleFonts.nunito(fontSize: 14, color: AppColors.textDark),
         decoration: InputDecoration(
           hintText: 'Min. 8 characters, 1 uppercase, 1 number',
-          hintStyle: GoogleFonts.nunito(color: AppColors.textLight, fontSize: 12),
+          hintStyle: GoogleFonts.nunito(
+              color: AppColors.textLight, fontSize: 12),
           prefixIcon: const Icon(Icons.lock_outline,
               color: AppColors.textLight, size: 20),
           suffixIcon: IconButton(
@@ -459,12 +418,9 @@ class _SignupScreenState extends State<SignupScreen> {
                 _obscurePass
                     ? Icons.visibility_off_outlined
                     : Icons.visibility_outlined,
-                color: AppColors.textLight,
-                size: 20),
-            onPressed: () => setState(() => _obscurePass = !_obscurePass),
-          ),
-          filled: true,
-          fillColor: Colors.white,
+                color: AppColors.textLight, size: 20),
+            onPressed: () => setState(() => _obscurePass = !_obscurePass)),
+          filled: true, fillColor: Colors.white,
           border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
               borderSide: const BorderSide(color: AppColors.border)),
@@ -473,14 +429,12 @@ class _SignupScreenState extends State<SignupScreen> {
               borderSide: const BorderSide(color: AppColors.border)),
           focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
-              borderSide:
-                  const BorderSide(color: AppColors.primary, width: 2)),
+              borderSide: const BorderSide(color: AppColors.primary, width: 2)),
         ),
       ),
       _buildPasswordStrengthBar(_passCtrl.text),
       const SizedBox(height: 16),
 
-      // Confirm password
       _buildLabel('CONFIRM PASSWORD'),
       const SizedBox(height: 8),
       TextField(
@@ -497,13 +451,10 @@ class _SignupScreenState extends State<SignupScreen> {
                 _obscureConfirm
                     ? Icons.visibility_off_outlined
                     : Icons.visibility_outlined,
-                color: AppColors.textLight,
-                size: 20),
+                color: AppColors.textLight, size: 20),
             onPressed: () =>
-                setState(() => _obscureConfirm = !_obscureConfirm),
-          ),
-          filled: true,
-          fillColor: Colors.white,
+                setState(() => _obscureConfirm = !_obscureConfirm)),
+          filled: true, fillColor: Colors.white,
           border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
               borderSide: const BorderSide(color: AppColors.border)),
@@ -512,13 +463,11 @@ class _SignupScreenState extends State<SignupScreen> {
               borderSide: const BorderSide(color: AppColors.border)),
           focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
-              borderSide:
-                  const BorderSide(color: AppColors.primary, width: 2)),
+              borderSide: const BorderSide(color: AppColors.primary, width: 2)),
         ),
       ),
       const SizedBox(height: 16),
 
-      // Terms notice
       Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
@@ -527,18 +476,14 @@ class _SignupScreenState extends State<SignupScreen> {
         child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
           const Text('ℹ️', style: TextStyle(fontSize: 16)),
           const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              "By signing up, you agree to CvSU GADRC's Terms of Service and Privacy Policy.",
-              style: GoogleFonts.nunito(
-                  fontSize: 12, color: AppColors.textMid, height: 1.5),
-            ),
-          ),
+          Expanded(child: Text(
+            "By signing up, you agree to CvSU GADRC's Terms of Service and Privacy Policy.",
+            style: GoogleFonts.nunito(
+                fontSize: 12, color: AppColors.textMid, height: 1.5))),
         ]),
       ),
       const SizedBox(height: 20),
 
-      // Create account button
       SizedBox(
         width: double.infinity,
         child: ElevatedButton(
@@ -548,12 +493,10 @@ class _SignupScreenState extends State<SignupScreen> {
             foregroundColor: Colors.white,
             shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(16)),
-            padding: const EdgeInsets.symmetric(vertical: 16),
-          ),
+            padding: const EdgeInsets.symmetric(vertical: 16)),
           child: _loading
               ? const SizedBox(
-                  height: 20,
-                  width: 20,
+                  height: 20, width: 20,
                   child: CircularProgressIndicator(
                       color: Colors.white, strokeWidth: 2.5))
               : Text('Create Account 🎉',
@@ -563,7 +506,6 @@ class _SignupScreenState extends State<SignupScreen> {
       ),
       const SizedBox(height: 12),
 
-      // Back button
       SizedBox(
         width: double.infinity,
         child: OutlinedButton(
@@ -572,12 +514,10 @@ class _SignupScreenState extends State<SignupScreen> {
             padding: const EdgeInsets.symmetric(vertical: 14),
             side: const BorderSide(color: AppColors.border, width: 1.5),
             shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16)),
-          ),
+                borderRadius: BorderRadius.circular(16))),
           child: Text('← Back',
               style: GoogleFonts.nunito(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
+                  fontSize: 14, fontWeight: FontWeight.w700,
                   color: AppColors.textMid)),
         ),
       ),
@@ -585,76 +525,58 @@ class _SignupScreenState extends State<SignupScreen> {
     ]);
   }
 
-  // ── Password strength bar ──────────────────────────────────
+  // ── Password strength bar ──────────────────────────────
   Widget _buildPasswordStrengthBar(String password) {
     if (password.isEmpty) return const SizedBox(height: 6);
-    final score = AppValidators.passwordStrength(password);
+    final score  = AppValidators.passwordStrength(password);
     final colors = [
-      Colors.transparent,
-      Colors.red,
-      Colors.orange,
-      Colors.lightGreen,
-      Colors.green,
+      Colors.transparent, Colors.red, Colors.orange,
+      Colors.lightGreen, Colors.green,
     ];
     final labels = ['', 'Weak', 'Fair', 'Good', 'Strong'];
-
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       const SizedBox(height: 8),
-      Row(
-        children: List.generate(4, (i) => Expanded(
-          child: Container(
-            height: 4,
-            margin: EdgeInsets.only(right: i < 3 ? 4 : 0),
-            decoration: BoxDecoration(
-              color: i < score ? colors[score] : AppColors.border,
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-        )),
-      ),
+      Row(children: List.generate(4, (i) => Expanded(child: Container(
+        height: 4,
+        margin: EdgeInsets.only(right: i < 3 ? 4 : 0),
+        decoration: BoxDecoration(
+          color: i < score ? colors[score] : AppColors.border,
+          borderRadius: BorderRadius.circular(2)))))),
       const SizedBox(height: 4),
-      Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(
-            score > 0 ? labels[score] : '',
+      Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+        Text(score > 0 ? labels[score] : '',
             style: GoogleFonts.nunito(
                 fontSize: 11,
                 color: score > 0 ? colors[score] : Colors.transparent,
-                fontWeight: FontWeight.w700),
-          ),
-          Text(
-            score < 4 ? 'Add uppercase & numbers for stronger password' : '✓ Strong password',
-            style: GoogleFonts.nunito(
-                fontSize: 10,
-                color: score == 4 ? Colors.green : AppColors.textLight),
-          ),
-        ],
-      ),
+                fontWeight: FontWeight.w700)),
+        Text(
+          score < 4
+              ? 'Add uppercase & numbers for stronger password'
+              : '✓ Strong password',
+          style: GoogleFonts.nunito(
+              fontSize: 10,
+              color: score == 4 ? Colors.green : AppColors.textLight)),
+      ]),
     ]);
   }
 
-  // ── Reusable text field ────────────────────────────────────
   Widget _buildTextField({
     required TextEditingController ctrl,
     required String hint,
     required IconData icon,
-    bool obscure            = false,
+    bool obscure = false,
     TextInputType? inputType,
     ValueChanged<String>? onChanged,
   }) {
     return TextField(
-      controller: ctrl,
-      obscureText: obscure,
-      keyboardType: inputType,
-      onChanged: onChanged,
+      controller: ctrl, obscureText: obscure,
+      keyboardType: inputType, onChanged: onChanged,
       style: GoogleFonts.nunito(fontSize: 14, color: AppColors.textDark),
       decoration: InputDecoration(
         hintText: hint,
         hintStyle: GoogleFonts.nunito(color: AppColors.textLight),
         prefixIcon: Icon(icon, color: AppColors.textLight, size: 20),
-        filled: true,
-        fillColor: Colors.white,
+        filled: true, fillColor: Colors.white,
         border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
             borderSide: const BorderSide(color: AppColors.border)),
@@ -663,22 +585,17 @@ class _SignupScreenState extends State<SignupScreen> {
             borderSide: const BorderSide(color: AppColors.border)),
         focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: AppColors.primary, width: 2)),
-      ),
+            borderSide: const BorderSide(color: AppColors.primary, width: 2))),
     );
   }
 
-  // ── Label helper ───────────────────────────────────────────
   Widget _buildLabel(String text) {
     return Text(text,
         style: GoogleFonts.nunito(
-            fontSize: 12,
-            fontWeight: FontWeight.w700,
-            color: AppColors.textMid,
-            letterSpacing: 0.5));
+            fontSize: 12, fontWeight: FontWeight.w700,
+            color: AppColors.textMid, letterSpacing: 0.5));
   }
 
-  // ── Login link ─────────────────────────────────────────────
   Widget _buildLoginLink() {
     return Padding(
       padding: const EdgeInsets.only(top: 24),
@@ -691,13 +608,11 @@ class _SignupScreenState extends State<SignupScreen> {
                   color: AppColors.textLight, fontSize: 13),
               children: [
                 const TextSpan(text: 'Already have an account? '),
-                TextSpan(
-                    text: 'Sign In',
+                TextSpan(text: 'Sign In',
                     style: GoogleFonts.nunito(
                         color: AppColors.primary,
                         fontWeight: FontWeight.w800)),
-              ],
-            ),
+              ]),
           ),
         ),
       ),
