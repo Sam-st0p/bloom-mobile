@@ -7,7 +7,7 @@ import '../utils/rate_limiter.dart';
 final _supabase = Supabase.instance.client;
 
 class AuthService {
-  // ── Sign In ────────────────────────────────────────────
+  // ── Sign In (email/password) ───────────────────────────
   static Future<String?> signIn(String email, String password) async {
     try {
       await _supabase.auth.signInWithPassword(
@@ -22,16 +22,12 @@ class AuthService {
     }
   }
 
-  // ── Sign Up Step 1 — create auth account only ──────────
-  // Does NOT insert profile yet — profile is inserted after
-  // OTP verification in signUpCompleteProfile()
+  // ── Sign Up — create auth account only ─────────────────
   static Future<String?> signUp({
     required String email,
     required String password,
     required String fullName,
     required String studentId,
-    required String department,
-    required int    yearLevel,
   }) async {
     try {
       await _supabase.auth.signUp(
@@ -40,11 +36,8 @@ class AuthService {
         data: {
           'full_name':  fullName,
           'student_id': studentId,
-          'department': department,
-          'year_level': yearLevel,
         },
       );
-      // Profile insert is deferred to after OTP verification
       return null;
     } on AuthException catch (e) {
       return e.message;
@@ -53,31 +46,24 @@ class AuthService {
     }
   }
 
-  // ── Sign Up Step 2 — insert profile after OTP verified ─
-  // Call this from OtpScreen.onVerified for signup flow
+  // ── Complete profile after OTP verified ────────────────
   static Future<void> signUpCompleteProfile({
     required String email,
     required String fullName,
     required String studentId,
-    required String department,
-    required int    yearLevel,
   }) async {
     try {
       final user = _supabase.auth.currentUser;
       if (user == null) return;
 
       await _supabase.from('profiles').upsert({
-        'id':          user.id,
-        'full_name':   fullName,
-        'student_id':  studentId,
-        'department':  department,
-        'year_level':  yearLevel,
-        'email':       email,
-        'is_active':   true,
+        'id':         user.id,
+        'full_name':  fullName,
+        'student_id': studentId,
+        'email':      email,
+        'is_active':  true,
       });
-    } catch (_) {
-      // Non-fatal — profile can be completed later
-    }
+    } catch (_) {}
   }
 
   // ── Update last sign in ────────────────────────────────

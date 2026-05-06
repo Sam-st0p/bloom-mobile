@@ -9,16 +9,14 @@ import '../theme/app_theme.dart';
 import '../services/auth_service.dart';
 
 class OtpScreen extends StatefulWidget {
-  final String  email;
-  final String  type; // 'signup' or 'login'
+  final String       email;
+  final String       type; // 'signup' or 'login'
   final VoidCallback onVerified;
   final VoidCallback onBack;
 
-  // Only needed for signup — to complete profile after OTP
+  // Only needed for signup
   final String? fullName;
   final String? studentId;
-  final String? department;
-  final int?    yearLevel;
 
   const OtpScreen({
     super.key,
@@ -28,8 +26,6 @@ class OtpScreen extends StatefulWidget {
     required this.onBack,
     this.fullName,
     this.studentId,
-    this.department,
-    this.yearLevel,
   });
 
   @override
@@ -65,7 +61,6 @@ class _OtpScreenState extends State<OtpScreen> {
     super.dispose();
   }
 
-  // ── Resend cooldown ────────────────────────────────────
   void _startResendCooldown(int seconds) {
     setState(() { _resendCooldown = seconds; _canResend = false; });
     Future.doWhile(() async {
@@ -97,33 +92,87 @@ class _OtpScreenState extends State<OtpScreen> {
         type:  OtpType.email,
       );
 
-      // For signup — insert profile now that session is confirmed
+      // Signup — save profile, sign out, show success dialog
       if (widget.type == 'signup' &&
-          widget.fullName   != null &&
-          widget.studentId  != null &&
-          widget.department != null &&
-          widget.yearLevel  != null) {
+          widget.fullName  != null &&
+          widget.studentId != null) {
         await AuthService.signUpCompleteProfile(
-          email:      widget.email,
-          fullName:   widget.fullName!,
-          studentId:  widget.studentId!,
-          department: widget.department!,
-          yearLevel:  widget.yearLevel!,
+          email:     widget.email,
+          fullName:  widget.fullName!,
+          studentId: widget.studentId!,
         );
+        // Sign out temp session so user signs in fresh
+        await Supabase.instance.client.auth.signOut(
+            scope: SignOutScope.local);
+
+        if (mounted) {
+          await showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (_) => AlertDialog(
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20)),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('🎉', style: TextStyle(fontSize: 48)),
+                  const SizedBox(height: 16),
+                  Text('Account Verified!',
+                      style: GoogleFonts.nunito(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w900,
+                          color: AppColors.textDark)),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Your account has been created successfully. Sign in to continue.',
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.nunito(
+                        fontSize: 13,
+                        color: AppColors.textLight,
+                        height: 1.5)),
+                ],
+              ),
+              actions: [
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      widget.onVerified(); // goes to Sign In
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primary,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                      padding:
+                          const EdgeInsets.symmetric(vertical: 14)),
+                    child: Text('Go to Sign In',
+                        style: GoogleFonts.nunito(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 15)),
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+        return;
       }
 
-      // For login — update last sign in timestamp
+      // Login — update last sign in then go to home
       if (widget.type == 'login') {
         await AuthService.updateLastSignIn();
+        if (mounted) widget.onVerified();
       }
-
-      if (mounted) widget.onVerified();
 
     } on AuthException catch (e) {
       if (mounted) {
-        setState(() { _loading = false; _error = _friendlyError(e.message); });
+        setState(() {
+          _loading = false;
+          _error   = _friendlyError(e.message);
+        });
         for (final c in _controllers) { c.clear(); }
-        // Delay focus to avoid DOM assertion on web
         Future.delayed(const Duration(milliseconds: 100), () {
           if (mounted) _focusNodes[0].requestFocus();
         });
@@ -180,11 +229,9 @@ class _OtpScreenState extends State<OtpScreen> {
     return 'Incorrect or expired code. Please try again.';
   }
 
-  // ── Handle digit input ─────────────────────────────────
   void _onDigitChanged(int index, String value) {
     if (value.length == 1) {
       if (index < 5) {
-        // Small delay to avoid web DOM assertion
         Future.delayed(const Duration(milliseconds: 50), () {
           if (mounted) _focusNodes[index + 1].requestFocus();
         });
@@ -198,18 +245,6 @@ class _OtpScreenState extends State<OtpScreen> {
       });
     }
     setState(() {});
-  }
-
-  // ── Handle paste ───────────────────────────────────────
-  void _onPaste(String pasted) {
-    final digits = pasted.replaceAll(RegExp(r'\D'), '');
-    if (digits.length >= 6) {
-      for (int i = 0; i < 6; i++) {
-        _controllers[i].text = digits[i];
-      }
-      setState(() {});
-      Future.delayed(const Duration(milliseconds: 100), _verify);
-    }
   }
 
   @override
@@ -258,19 +293,21 @@ class _OtpScreenState extends State<OtpScreen> {
               child: const Center(
                   child: Text('🔐', style: TextStyle(fontSize: 36)))),
             const SizedBox(height: 16),
-            Text('Verify your email',
-                style: GoogleFonts.nunito(
-                    color: Colors.white, fontSize: 22,
-                    fontWeight: FontWeight.w900)),
+            Text(
+              widget.type == 'signup'
+                  ? 'Verify your email'
+                  : 'Two-step verification',
+              style: GoogleFonts.nunito(
+                  color: Colors.white, fontSize: 22,
+                  fontWeight: FontWeight.w900)),
             const SizedBox(height: 6),
             Text('GADRC CvSU',
                 style: GoogleFonts.nunito(
                     color: Colors.white.withOpacity(0.75), fontSize: 13)),
-            const SizedBox(height: 8),
           ]),
         ),
 
-        // ── Form ───────────────────────────────────────
+        // ── Body ───────────────────────────────────────
         Expanded(
           child: SingleChildScrollView(
             padding: const EdgeInsets.fromLTRB(24, 32, 24, 24),
@@ -295,6 +332,14 @@ class _OtpScreenState extends State<OtpScreen> {
                             color: AppColors.primary,
                             fontWeight: FontWeight.w800)),
                     ]),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  widget.type == 'signup'
+                      ? 'Verify to complete your registration'
+                      : 'Enter the code to sign in',
+                  style: GoogleFonts.nunito(
+                      fontSize: 12, color: AppColors.textLight),
                 ),
                 const SizedBox(height: 32),
 
@@ -343,13 +388,12 @@ class _OtpScreenState extends State<OtpScreen> {
                               blurRadius: 8,
                               offset: const Offset(0, 2)),
                         ]),
-                      // ── Plain TextField — no RawKeyboardListener ──
                       child: TextField(
-                        controller:  _controllers[i],
-                        focusNode:   _focusNodes[i],
-                        textAlign:   TextAlign.center,
+                        controller:   _controllers[i],
+                        focusNode:    _focusNodes[i],
+                        textAlign:    TextAlign.center,
                         keyboardType: TextInputType.number,
-                        maxLength:   1,
+                        maxLength:    1,
                         style: GoogleFonts.nunito(
                             fontSize: 22,
                             fontWeight: FontWeight.w900,
@@ -427,8 +471,9 @@ class _OtpScreenState extends State<OtpScreen> {
                       const Text('💡', style: TextStyle(fontSize: 16)),
                       const SizedBox(width: 10),
                       Expanded(child: Text(
-                        'Check your inbox and spam folder. '
-                        'The code expires in 10 minutes.',
+                        widget.type == 'signup'
+                            ? 'Check your inbox and spam folder. Once verified, tap "Go to Sign In" to continue.'
+                            : 'Check your inbox and spam folder. The code expires in 10 minutes.',
                         style: GoogleFonts.nunito(
                             fontSize: 12,
                             color: AppColors.textMid,
