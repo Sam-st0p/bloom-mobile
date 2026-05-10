@@ -26,6 +26,10 @@ dependencies:
   url_launcher: ^6.3.2
   web: ^1.1.1
 
+  share_plus: ^10.0.0
+  path_provider: ^2.1.4
+  image_gallery_saver: ^2.0.3
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -33,6 +37,6 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
   assets:
-    - .env
-    - .env
+    - assets/config.json

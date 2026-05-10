@@ -126,7 +126,7 @@ class _SignupScreenState extends State<SignupScreen> {
       return OtpScreen(
         email:      _email,
         type:       'signup',
-        onVerified: widget.onGoLogin, // after OTP → go to Sign In
+        onVerified: widget.onGoLogin,
         fullName:   _normalizedName,
         studentId:  _normalizedId,
         onBack: () => setState(() => _showOtp = false),
@@ -330,7 +330,7 @@ class _SignupScreenState extends State<SignupScreen> {
                   ),
                   const SizedBox(height: 20),
 
-                  // ── Terms note ────────────────────────
+                  // ── Info note ─────────────────────────
                   Container(
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
@@ -339,12 +339,12 @@ class _SignupScreenState extends State<SignupScreen> {
                     child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text('ℹ️',
-                              style: TextStyle(fontSize: 16)),
+                          const Icon(Icons.info_outline_rounded,
+                              color: AppColors.primary, size: 18),
                           const SizedBox(width: 10),
                           Expanded(
                               child: Text(
-                            "A verification code will be sent to your email after signing up.",
+                            'A verification code will be sent to your email after signing up.',
                             style: GoogleFonts.nunito(
                                 fontSize: 12,
                                 color: AppColors.textMid,
@@ -356,8 +356,22 @@ class _SignupScreenState extends State<SignupScreen> {
                   // ── Create Account button ─────────────
                   SizedBox(
                     width: double.infinity,
-                    child: ElevatedButton(
+                    child: ElevatedButton.icon(
                       onPressed: _loading ? null : _handleSignup,
+                      icon: _loading
+                          ? const SizedBox(
+                              height: 18, width: 18,
+                              child: CircularProgressIndicator(
+                                  color: Colors.white, strokeWidth: 2.5))
+                          : const Icon(Icons.check_circle_outline_rounded,
+                              size: 20, color: Colors.white),
+                      label: _loading
+                          ? const SizedBox.shrink()
+                          : Text('Create Account',
+                              style: GoogleFonts.nunito(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w800,
+                                  color: Colors.white)),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppColors.primary,
                         foregroundColor: Colors.white,
@@ -365,15 +379,6 @@ class _SignupScreenState extends State<SignupScreen> {
                             borderRadius: BorderRadius.circular(16)),
                         padding:
                             const EdgeInsets.symmetric(vertical: 16)),
-                      child: _loading
-                          ? const SizedBox(
-                              height: 20, width: 20,
-                              child: CircularProgressIndicator(
-                                  color: Colors.white, strokeWidth: 2.5))
-                          : Text('Create Account 🎉',
-                              style: GoogleFonts.nunito(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w800)),
                     ),
                   ),
                   const SizedBox(height: 16),
@@ -433,11 +438,10 @@ class _SignupScreenState extends State<SignupScreen> {
         Text(
           score < 4
               ? 'Add uppercase & numbers for stronger password'
-              : '✓ Strong password',
+              : 'Strong password',
           style: GoogleFonts.nunito(
               fontSize: 10,
-              color:
-                  score == 4 ? Colors.green : AppColors.textLight)),
+              color: score == 4 ? Colors.green : AppColors.textLight)),
       ]),
     ]);
   }

@@ -115,7 +115,19 @@ class _OtpScreenState extends State<OtpScreen> {
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text('🎉', style: TextStyle(fontSize: 48)),
+                  Container(
+                    width: 64,
+                    height: 64,
+                    decoration: BoxDecoration(
+                      color: AppColors.primary.withOpacity(0.1),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.check_circle_rounded,
+                      color: AppColors.primary,
+                      size: 36,
+                    ),
+                  ),
                   const SizedBox(height: 16),
                   Text('Account Verified!',
                       style: GoogleFonts.nunito(
@@ -291,7 +303,13 @@ class _OtpScreenState extends State<OtpScreen> {
                 border: Border.all(
                     color: Colors.white.withOpacity(0.3), width: 1.5)),
               child: const Center(
-                  child: Text('🔐', style: TextStyle(fontSize: 36)))),
+                child: Icon(
+                  Icons.lock_rounded,
+                  color: Colors.white,
+                  size: 36,
+                ),
+              ),
+            ),
             const SizedBox(height: 16),
             Text(
               widget.type == 'signup'
@@ -468,7 +486,11 @@ class _OtpScreenState extends State<OtpScreen> {
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('💡', style: TextStyle(fontSize: 16)),
+                      const Icon(
+                        Icons.info_outline_rounded,
+                        color: AppColors.primary,
+                        size: 18,
+                      ),
                       const SizedBox(width: 10),
                       Expanded(child: Text(
                         widget.type == 'signup'

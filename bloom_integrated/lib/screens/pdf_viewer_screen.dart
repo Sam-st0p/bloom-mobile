@@ -32,7 +32,6 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
       _viewId,
       (int viewId) {
         final iframe = web.document.createElement('iframe') as web.HTMLIFrameElement;
-        // Use Google Docs Viewer to embed PDF inline instead of opening a new tab
         final embedUrl = 'https://docs.google.com/viewer?url=${Uri.encodeComponent(widget.url)}&embedded=true';
         iframe.src = embedUrl;
         iframe.style.border = 'none';
@@ -42,7 +41,6 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
       },
     );
 
-    // Fallback loading timeout
     Future.delayed(const Duration(seconds: 3), () {
       if (mounted && _loading) setState(() => _loading = false);
     });
@@ -85,7 +83,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                   children: [
                     const CircularProgressIndicator(color: AppColors.primary),
                     const SizedBox(height: 16),
-                    Text('Loading PDF…',
+                    Text('Loading PDF',
                         style: GoogleFonts.nunito(
                             color: AppColors.textMid, fontSize: 14)),
                   ],

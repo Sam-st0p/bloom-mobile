@@ -4,7 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:share_plus/share_plus.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:image_gallery_saver/image_gallery_saver.dart';
+// ignore: avoid_web_libraries_in_flutter
+import 'dart:html' as html;
 import '../theme/app_theme.dart';
 
 final _db = Supabase.instance.client;
@@ -74,6 +79,8 @@ class _BadgesScreenState extends State<BadgesScreen>
 
   @override
   Widget build(BuildContext context) {
+    final topPadding = MediaQuery.of(context).padding.top;
+
     return Scaffold(
       backgroundColor: const Color(0xFFF6F9F0),
       body: RefreshIndicator(
@@ -82,41 +89,73 @@ class _BadgesScreenState extends State<BadgesScreen>
         child: NestedScrollView(
           headerSliverBuilder: (ctx, _) => [
             SliverAppBar(
-              expandedHeight: 160, pinned: true, automaticallyImplyLeading: false,
+              expandedHeight: topPadding + 160,
+              pinned: true,
+              backgroundColor: AppColors.primaryDark,
+              automaticallyImplyLeading: false,
               leading: Navigator.canPop(context)
                   ? IconButton(
                       icon: const Icon(Icons.arrow_back, color: Colors.white),
                       onPressed: () => Navigator.pop(context))
                   : null,
-              backgroundColor: const Color(0xFF2D4A18),
               flexibleSpace: FlexibleSpaceBar(
+                titlePadding: EdgeInsets.zero,
                 background: Container(
                   decoration: const BoxDecoration(
                     gradient: LinearGradient(
-                      colors: [Color(0xFF2D4A18), Color(0xFF5A7A3A)],
-                      begin: Alignment.topLeft, end: Alignment.bottomRight)),
-                  padding: const EdgeInsets.fromLTRB(20, 54, 20, 16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      Text('Badges & Certificates',
-                          style: GoogleFonts.nunito(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w900)),
-                      const SizedBox(height: 8),
-                      Row(children: [
-                        _StatPill('🏅 ${_earnedBadges.length} Badge${_earnedBadges.length != 1 ? 's' : ''} Earned'),
-                        const SizedBox(width: 10),
-                        _StatPill('🏆 ${_certificates.length} Certificate${_certificates.length != 1 ? 's' : ''}'),
-                      ]),
-                    ],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [AppColors.primaryDark, AppColors.primary],
+                    ),
+                  ),
+                  child: SafeArea(
+                    bottom: false,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 20, 20, 72),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          Text(
+                            'Achievements',
+                            style: GoogleFonts.nunito(
+                              color: Colors.white,
+                              fontSize: 22,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              _StatPill(
+                                icon: Icons.military_tech_rounded,
+                                text: '${_earnedBadges.length} Badge${_earnedBadges.length != 1 ? 's' : ''} Earned',
+                              ),
+                              const SizedBox(width: 10),
+                              _StatPill(
+                                icon: Icons.workspace_premium_rounded,
+                                text: '${_certificates.length} Certificate${_certificates.length != 1 ? 's' : ''}',
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
               ),
               bottom: TabBar(
                 controller: _tabs,
-                indicatorColor: Colors.white, labelColor: Colors.white, unselectedLabelColor: Colors.white54,
+                indicatorColor: Colors.white,
+                indicatorWeight: 3,
+                labelColor: Colors.white,
+                unselectedLabelColor: Colors.white54,
                 labelStyle: GoogleFonts.nunito(fontWeight: FontWeight.w700, fontSize: 13),
-                tabs: const [Tab(text: '🏅 Badges'), Tab(text: '🏆 Certificates')],
+                tabs: const [
+                  Tab(icon: Icon(Icons.military_tech_rounded, size: 16), text: 'Achievements'),
+                  Tab(icon: Icon(Icons.workspace_premium_rounded, size: 16), text: 'Certificates'),
+                ],
               ),
             ),
           ],
@@ -133,17 +172,36 @@ class _BadgesScreenState extends State<BadgesScreen>
 }
 
 class _StatPill extends StatelessWidget {
+  final IconData icon;
   final String text;
-  const _StatPill(this.text);
+  const _StatPill({required this.icon, required this.text});
+
   @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-    decoration: BoxDecoration(
-      color: Colors.white.withOpacity(0.2),
-      borderRadius: BorderRadius.circular(20)),
-    child: Text(text,
-        style: GoogleFonts.nunito(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700)),
-  );
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.2),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Icon(icon, size: 13, color: Colors.white),
+          const SizedBox(width: 5),
+          Text(
+            text,
+            style: GoogleFonts.nunito(
+              color: Colors.white,
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -162,13 +220,14 @@ class _BadgesTab extends StatelessWidget {
 
     return ListView(padding: const EdgeInsets.all(16), children: [
       if (earnedBadges.isNotEmpty) ...[
-        _SectionHeader('🏅 Earned Badges (${earnedBadges.length})'),
+        _SectionHeader(icon: Icons.military_tech_rounded,
+            text: 'Earned Achievements (${earnedBadges.length})'),
         const SizedBox(height: 10),
         GridView.builder(
           shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
           gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 2, childAspectRatio: 1.1,
-            crossAxisSpacing: 10, mainAxisSpacing: 10),
+              crossAxisCount: 2, childAspectRatio: 1.1,
+              crossAxisSpacing: 10, mainAxisSpacing: 10),
           itemCount: earnedBadges.length,
           itemBuilder: (ctx, i) {
             final sb    = earnedBadges[i];
@@ -192,13 +251,14 @@ class _BadgesTab extends StatelessWidget {
             .toList();
         if (locked.isEmpty) return <Widget>[];
         return <Widget>[
-          _SectionHeader('🔒 Locked Badges (${locked.length})'),
+          _SectionHeader(icon: Icons.lock_outline_rounded,
+              text: 'Locked Achievements (${locked.length})'),
           const SizedBox(height: 10),
           GridView.builder(
             shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
             gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 2, childAspectRatio: 1.1,
-              crossAxisSpacing: 10, mainAxisSpacing: 10),
+                crossAxisCount: 2, childAspectRatio: 1.1,
+                crossAxisSpacing: 10, mainAxisSpacing: 10),
             itemCount: locked.length,
             itemBuilder: (ctx, i) => _BadgeCard(
               name:        locked[i]['name'] as String? ?? 'Badge',
@@ -212,19 +272,26 @@ class _BadgesTab extends StatelessWidget {
       })(),
 
       if (earnedBadges.isEmpty && allBadges.isEmpty)
-        const _EmptyState(icon: '🏅', title: 'No badges yet',
-            sub: 'Complete assessments and modules to earn badges'),
+        const _EmptyState(
+          icon: Icons.military_tech_outlined,
+          title: 'No achievements yet',
+          sub: 'Complete assessments and modules to earn achievements',
+        ),
     ]);
   }
 }
 
 class _SectionHeader extends StatelessWidget {
+  final IconData icon;
   final String text;
-  const _SectionHeader(this.text);
+  const _SectionHeader({required this.icon, required this.text});
   @override
-  Widget build(BuildContext context) => Text(text,
-      style: GoogleFonts.nunito(
-          fontSize: 14, fontWeight: FontWeight.w800, color: const Color(0xFF2D4A18)));
+  Widget build(BuildContext context) => Row(children: [
+    Icon(icon, size: 16, color: AppColors.primaryDark),
+    const SizedBox(width: 6),
+    Text(text, style: GoogleFonts.nunito(
+        fontSize: 14, fontWeight: FontWeight.w800, color: AppColors.primaryDark)),
+  ]);
 }
 
 class _BadgeCard extends StatelessWidget {
@@ -242,8 +309,8 @@ class _BadgeCard extends StatelessWidget {
       color: earned ? Colors.white : Colors.white.withOpacity(0.6),
       borderRadius: BorderRadius.circular(14),
       border: Border.all(
-        color: earned ? const Color(0xFFFDE047) : const Color(0xFFE5E7EB),
-        width: earned ? 1.5 : 1),
+          color: earned ? const Color(0xFFFDE047) : const Color(0xFFE5E7EB),
+          width: earned ? 1.5 : 1),
       boxShadow: earned
           ? [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 8)]
           : null,
@@ -254,18 +321,21 @@ class _BadgeCard extends StatelessWidget {
         Container(
           width: 56, height: 56,
           decoration: BoxDecoration(
-            color: earned ? const Color(0xFFFEF9C3) : const Color(0xFFF3F4F6),
-            borderRadius: BorderRadius.circular(12)),
+              color: earned ? const Color(0xFFFEF9C3) : const Color(0xFFF3F4F6),
+              borderRadius: BorderRadius.circular(12)),
           child: Center(
             child: iconUrl != null
                 ? ClipRRect(
                     borderRadius: BorderRadius.circular(8),
                     child: Image.network(iconUrl!,
                         width: 36, height: 36, fit: BoxFit.contain,
-                        errorBuilder: (_, __, ___) =>
-                            const Text('🏅', style: TextStyle(fontSize: 28))))
-                : Text(earned ? '🏅' : '🔒',
-                    style: TextStyle(fontSize: 28, color: earned ? null : Colors.grey)),
+                        errorBuilder: (_, __, ___) => Icon(
+                            Icons.military_tech_rounded, size: 28,
+                            color: earned ? AppColors.primaryDark : Colors.grey)))
+                : Icon(
+                    earned ? Icons.military_tech_rounded : Icons.lock_outline_rounded,
+                    size: 28,
+                    color: earned ? AppColors.primaryDark : Colors.grey),
           ),
         ),
         if (!earned)
@@ -280,7 +350,7 @@ class _BadgeCard extends StatelessWidget {
           textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis,
           style: GoogleFonts.nunito(
               fontSize: 12, fontWeight: FontWeight.w800,
-              color: earned ? const Color(0xFF2D4A18) : Colors.grey[500])),
+              color: earned ? AppColors.primaryDark : Colors.grey[500])),
       if (awardedAt != null) ...[
         const SizedBox(height: 3),
         Text(_fmtDate(awardedAt), style: GoogleFonts.nunito(fontSize: 10, color: Colors.grey)),
@@ -313,8 +383,9 @@ class _CertsTab extends StatelessWidget {
   Widget build(BuildContext context) {
     if (certificates.isEmpty) {
       return const _EmptyState(
-          icon: '🏆', title: 'No certificates yet',
-          sub: 'Complete modules and seminars to earn certificates');
+          icon: Icons.workspace_premium_outlined,
+          title: 'No certificates yet',
+          sub: 'Attend seminars and complete modules to earn certificates');
     }
     return ListView.builder(
       padding: const EdgeInsets.all(16),
@@ -322,7 +393,8 @@ class _CertsTab extends StatelessWidget {
       itemBuilder: (ctx, i) {
         final cert = certificates[i];
         return GestureDetector(
-          onTap: () => _openCertificateViewer(ctx, cert),
+          onTap: () => Navigator.push(ctx, MaterialPageRoute(
+              builder: (_) => CertificateViewerScreen(cert: cert, fullName: fullName))),
           child: Container(
             margin: const EdgeInsets.only(bottom: 14),
             decoration: BoxDecoration(
@@ -338,8 +410,9 @@ class _CertsTab extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 decoration: const BoxDecoration(
                   gradient: LinearGradient(
-                    colors: [Color(0xFF1A2E1A), Color(0xFF2D6A2D)],
-                    begin: Alignment.centerLeft, end: Alignment.centerRight),
+                      colors: [AppColors.primaryDark, AppColors.primary],
+                      begin: Alignment.centerLeft,
+                      end: Alignment.centerRight),
                   borderRadius: BorderRadius.vertical(top: Radius.circular(12))),
                 child: Row(children: [
                   Container(
@@ -379,12 +452,10 @@ class _CertsTab extends StatelessWidget {
                   Text(fullName.isNotEmpty ? fullName : 'Recipient',
                       style: GoogleFonts.nunito(
                           fontSize: 18, fontWeight: FontWeight.w900,
-                          color: const Color(0xFF1A2E1A), fontStyle: FontStyle.italic)),
+                          color: AppColors.primaryDark, fontStyle: FontStyle.italic)),
                   const SizedBox(height: 8),
-                  Text(
-                      'has successfully fulfilled the requirements of the BLOOM GAD e-Learning Program.',
-                      style: GoogleFonts.nunito(
-                          fontSize: 11, color: Colors.grey[600], height: 1.5)),
+                  Text('has successfully fulfilled the requirements of the BLOOM GAD e-Learning Program.',
+                      style: GoogleFonts.nunito(fontSize: 11, color: Colors.grey[600], height: 1.5)),
                   const SizedBox(height: 12),
                   Row(children: [
                     Container(
@@ -396,7 +467,7 @@ class _CertsTab extends StatelessWidget {
                       child: Text(cert['certificate_code'] ?? '—',
                           style: GoogleFonts.nunito(
                               fontSize: 11, fontWeight: FontWeight.w800,
-                              color: const Color(0xFF2D6A2D), letterSpacing: 1))),
+                              color: AppColors.primary, letterSpacing: 1))),
                     const Spacer(),
                     Text('Issued ${_fmtDate(cert['issued_at'] as String?)}',
                         style: GoogleFonts.nunito(fontSize: 11, color: Colors.grey)),
@@ -409,17 +480,10 @@ class _CertsTab extends StatelessWidget {
       },
     );
   }
-
-  void _openCertificateViewer(BuildContext context, Map<String, dynamic> cert) {
-    Navigator.push(context, MaterialPageRoute(
-      builder: (_) => CertificateViewerScreen(cert: cert, fullName: fullName),
-    ));
-  }
 }
 
 // ─────────────────────────────────────────────────────────────────
 //  CERTIFICATE VIEWER SCREEN
-//  Full-screen landscape certificate viewer with pinch-to-zoom
 // ─────────────────────────────────────────────────────────────────
 class CertificateViewerScreen extends StatefulWidget {
   final Map<String, dynamic> cert;
@@ -438,142 +502,121 @@ class _CertificateViewerScreenState extends State<CertificateViewerScreen> {
         ? 'Certificate of Achievement'
         : 'Certificate of ${refType[0].toUpperCase()}${refType.substring(1)}';
   }
-
-  String get _recipientName =>
-      widget.fullName.isNotEmpty ? widget.fullName : 'Recipient';
-
-  String get _code => widget.cert['certificate_code'] as String? ?? '—';
-  String get _issued => _fmtDate(widget.cert['issued_at'] as String?);
-
-  String get _bodyText =>
-      widget.cert['body_text'] as String? ??
+  String get _recipientName => widget.fullName.isNotEmpty ? widget.fullName : 'Recipient';
+  String get _code     => widget.cert['certificate_code'] as String? ?? '—';
+  String get _issued   => _fmtDate(widget.cert['issued_at'] as String?);
+  String get _bodyText => widget.cert['body_text'] as String? ??
       'has successfully completed the requirements of the BLOOM GAD e-Learning Program and is hereby awarded this certificate in recognition of outstanding participation and commitment to Gender and Development advocacy.';
-
-  String get _sig1Name =>
-      widget.cert['sig1_name'] as String? ?? 'GAD Coordinator';
-
-  String get _sig1Title =>
-      widget.cert['sig1_title'] as String? ?? 'Cavite State University';
-
-  String get _sig2Name =>
-      widget.cert['sig2_name'] as String? ?? 'GADRC Director';
-
-  String get _sig2Title =>
-      widget.cert['sig2_title'] as String? ?? 'Cavite State University';
+  String get _sig1Name  => widget.cert['sig1_name']  as String? ?? 'GAD Coordinator';
+  String get _sig1Title => widget.cert['sig1_title'] as String? ?? 'Cavite State University';
+  String get _sig2Name  => widget.cert['sig2_name']  as String? ?? 'GADRC Director';
+  String get _sig2Title => widget.cert['sig2_title'] as String? ?? 'Cavite State University';
 
   Color get _themeColor {
-    final colorStr = widget.cert['theme_color'] as String?;
-    if (colorStr == null) return const Color(0xFF2D6A2D);
-    try {
-      return Color(int.parse(colorStr.replaceFirst('#', '0xff')));
-    } catch (_) {
-      return const Color(0xFF2D6A2D);
-    }
+    final c = widget.cert['theme_color'] as String?;
+    if (c == null) return AppColors.primary;
+    try { return Color(int.parse(c.replaceFirst('#', '0xff'))); }
+    catch (_) { return AppColors.primary; }
   }
 
-  Future<void> _saveAsImage() async {
+  /// Capture the RepaintBoundary as a high-res PNG
+  Future<Uint8List?> _capturePng() async {
+    final boundary = _repaintKey.currentContext?.findRenderObject()
+        as RenderRepaintBoundary?;
+    if (boundary == null) return null;
+    final image    = await boundary.toImage(pixelRatio: 3.0);
+    final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+    return byteData?.buffer.asUint8List();
+  }
+
+  /// Triggers a browser file download of the certificate PNG
+  Future<void> _saveToGallery() async {
     setState(() => _saving = true);
     try {
-      final boundary = _repaintKey.currentContext!.findRenderObject()
-          as RenderRepaintBoundary;
-      // High-res capture (3x for retina)
-      final image = await boundary.toImage(pixelRatio: 3.0);
-      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
-      if (byteData == null) throw Exception('Failed to capture image');
+      final bytes = await _capturePng();
+      if (bytes == null) throw Exception('Could not capture certificate.');
 
-      final pngBytes = byteData.buffer.asUint8List();
+      final fileName =
+          'BLOOM_GAD_${_code.replaceAll(RegExp(r'[^A-Za-z0-9]'), '_')}.png';
 
-      if (!mounted) return;
+      final blob   = html.Blob([bytes], 'image/png');
+      final url    = html.Url.createObjectUrlFromBlob(blob);
+      final anchor = html.AnchorElement(href: url)
+        ..setAttribute('download', fileName)
+        ..click();
+      html.Url.revokeObjectUrl(url);
 
-      // Open save dialog — show bytes as downloadable on web,
-      // or open share sheet on mobile
-      await _downloadOrShare(pngBytes);
+      _showSnack('✓ Certificate download started!', isSuccess: true);
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Could not save: $e',
-              style: GoogleFonts.nunito(fontSize: 13)),
-          backgroundColor: const Color(0xFFDC2626),
-        ));
-      }
+      if (mounted) _showSnack('Error: $e', isSuccess: false);
     } finally {
       if (mounted) setState(() => _saving = false);
     }
   }
 
-  Future<void> _downloadOrShare(Uint8List pngBytes) async {
-    // On web — trigger browser download
-    // On mobile — open share sheet via URL trick with a blob
-    // We use the web package for web, and a workaround for mobile
-    try {
-      // Try web download first (works in Chrome/browser)
-      // ignore: avoid_web_libraries_in_flutter
-      final blob = _createBlob(pngBytes);
-      final url  = _createObjectUrl(blob);
-      final anchor = _createAnchor(url, '${_code}_certificate.png');
-      _clickAnchor(anchor);
-      _revokeObjectUrl(url);
-    } catch (_) {
-      // Mobile fallback — launch share via URL launcher isn't ideal,
-      // so show success message and tell user to screenshot
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Use screenshot to save, or try in Chrome browser.',
-              style: GoogleFonts.nunito(fontSize: 13)),
-          backgroundColor: const Color(0xFF2D6A2D),
-          duration: const Duration(seconds: 4),
-        ));
-      }
-    }
+  /// Share icon on web — just re-triggers the download
+  Future<void> _shareImage() => _saveToGallery();
+
+  Future<void> _shareBytes(Uint8List bytes) async {
+    final fileName =
+        'BLOOM_GAD_${_code.replaceAll(RegExp(r'[^A-Za-z0-9]'), '_')}.png';
+    final blob   = html.Blob([bytes], 'image/png');
+    final url    = html.Url.createObjectUrlFromBlob(blob);
+    final anchor = html.AnchorElement(href: url)
+      ..setAttribute('download', fileName)
+      ..click();
+    html.Url.revokeObjectUrl(url);
   }
 
-  // Web-only helpers — wrapped in try/catch so they silently fail on mobile
-  dynamic _createBlob(Uint8List bytes) {
-    // Uses dart:html on web
-    try {
-      return (Uri.dataFromBytes(bytes, mimeType: 'image/png'));
-    } catch (_) { return null; }
+
+
+
+
+  void _showSnack(String msg, {required bool isSuccess}) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg, style: GoogleFonts.nunito(fontSize: 13, color: Colors.white)),
+      backgroundColor: isSuccess ? AppColors.primary : const Color(0xFFDC2626),
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      duration: const Duration(seconds: 3),
+    ));
   }
-  dynamic _createObjectUrl(dynamic blob) => blob?.toString();
-  dynamic _createAnchor(String? url, String filename) => url;
-  void _clickAnchor(dynamic anchor) {
-    if (anchor != null) {
-      launchUrl(Uri.parse(anchor.toString()),
-          mode: LaunchMode.externalApplication);
-    }
-  }
-  void _revokeObjectUrl(dynamic url) {}
 
   @override
   Widget build(BuildContext context) {
     final screenW = MediaQuery.of(context).size.width;
-    final screenH = MediaQuery.of(context).size.height;
-
-    // Certificate is landscape A4 ratio (297:210 = ~1.414)
-    // We render it at screen width and let the user pinch-zoom
-    final certW = screenW - 32; // 16px padding each side
-    final certH = certW / 1.1; // slightly taller than A4 to fit all content on mobile
+    final certW   = screenW - 32;
+    final certH   = certW / 1.1;
 
     return Scaffold(
-      backgroundColor: const Color(0xFF1A2E1A),
+      backgroundColor: AppColors.primaryDark,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF1A2E1A),
+        backgroundColor: AppColors.primaryDark,
         foregroundColor: Colors.white,
         elevation: 0,
         title: Text(_certTitle,
             style: GoogleFonts.nunito(
                 fontSize: 15, fontWeight: FontWeight.w700, color: Colors.white)),
         actions: [
+          // Share button
+          if (!_saving)
+            IconButton(
+              tooltip: 'Share',
+              onPressed: _shareImage,
+              icon: const Icon(Icons.share_outlined, color: Colors.white, size: 20),
+            ),
+          // Save to gallery button
           if (_saving)
             const Padding(
               padding: EdgeInsets.all(14),
-              child: SizedBox(width: 20, height: 20,
+              child: SizedBox(
+                  width: 20, height: 20,
                   child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)),
             )
           else
             TextButton.icon(
-              onPressed: _saveAsImage,
-              icon: const Icon(Icons.download_outlined, size: 18, color: Colors.white),
+              onPressed: _saveToGallery,
+              icon: const Icon(Icons.download_rounded, size: 18, color: Colors.white),
               label: Text('Save',
                   style: GoogleFonts.nunito(
                       fontSize: 13, fontWeight: FontWeight.w700, color: Colors.white)),
@@ -582,25 +625,18 @@ class _CertificateViewerScreenState extends State<CertificateViewerScreen> {
       ),
       body: Center(
         child: InteractiveViewer(
-          minScale: 0.8,
-          maxScale: 4.0,
+          minScale: 0.8, maxScale: 4.0,
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
             child: RepaintBoundary(
               key: _repaintKey,
               child: SizedBox(
-                width: certW,
-                height: certH,
+                width: certW, height: certH,
                 child: CertificateCard(
-                  certTitle:  _certTitle,
-                  name:       _recipientName,
-                  code:       _code,
-                  issued:     _issued,
-                  bodyText:   _bodyText,
-                  sig1Name:   _sig1Name,
-                  sig1Title:  _sig1Title,
-                  sig2Name:   _sig2Name,
-                  sig2Title:  _sig2Title,
+                  certTitle: _certTitle, name: _recipientName,
+                  code: _code, issued: _issued, bodyText: _bodyText,
+                  sig1Name: _sig1Name, sig1Title: _sig1Title,
+                  sig2Name: _sig2Name, sig2Title: _sig2Title,
                   themeColor: _themeColor,
                 ),
               ),
@@ -609,12 +645,12 @@ class _CertificateViewerScreenState extends State<CertificateViewerScreen> {
         ),
       ),
       bottomNavigationBar: Container(
-        color: const Color(0xFF1A2E1A),
+        color: AppColors.primaryDark,
         padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
         child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
           const Icon(Icons.pinch_outlined, color: Colors.white54, size: 16),
           const SizedBox(width: 6),
-          Text('Pinch to zoom · Tap Save to download',
+          Text('Pinch to zoom  ·  Tap Save to download',
               style: GoogleFonts.nunito(fontSize: 12, color: Colors.white54)),
         ]),
       ),
@@ -623,13 +659,13 @@ class _CertificateViewerScreenState extends State<CertificateViewerScreen> {
 }
 
 // ─────────────────────────────────────────────────────────────────
-//  CERTIFICATE CARD WIDGET
-//  Pure Flutter widget — no rotation trick, renders landscape natively
+//  CERTIFICATE CARD
 // ─────────────────────────────────────────────────────────────────
 class CertificateCard extends StatelessWidget {
-  final String certTitle, name, code, issued, bodyText, sig1Name, sig1Title, sig2Name, sig2Title;
+  final String certTitle, name, code, issued, bodyText,
+               sig1Name, sig1Title, sig2Name, sig2Title;
   final Color themeColor;
-  const CertificateCard({
+  const CertificateCard({super.key,
     required this.certTitle, required this.name,
     required this.code,      required this.issued,
     this.bodyText  = 'has successfully completed the requirements of the BLOOM GAD e-Learning Program and is hereby awarded this certificate in recognition of outstanding participation and commitment to Gender and Development advocacy.',
@@ -637,7 +673,7 @@ class CertificateCard extends StatelessWidget {
     this.sig1Title = 'Cavite State University',
     this.sig2Name  = 'GADRC Director',
     this.sig2Title = 'Cavite State University',
-    this.themeColor = const Color(0xFF2D6A2D),
+    this.themeColor = AppColors.primary,
   });
 
   @override
@@ -645,71 +681,57 @@ class CertificateCard extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         gradient: const LinearGradient(
-          colors: [Color(0xFFFAFDF6), Color(0xFFF0F7EC)],
-          begin: Alignment.topLeft, end: Alignment.bottomRight),
+            colors: [Color(0xFFFAFDF6), Color(0xFFF0F7EC)],
+            begin: Alignment.topLeft, end: Alignment.bottomRight),
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: themeColor, width: 6),
         boxShadow: [BoxShadow(
-            color: Colors.black.withOpacity(0.25), blurRadius: 24, offset: const Offset(0, 8))],
+            color: Colors.black.withOpacity(0.25), blurRadius: 24,
+            offset: const Offset(0, 8))],
       ),
       child: Stack(children: [
-        // Inner border decoration
         Positioned.fill(child: Padding(
           padding: const EdgeInsets.all(8),
-          child: DecoratedBox(
-            decoration: BoxDecoration(
+          child: DecoratedBox(decoration: BoxDecoration(
               border: Border.all(color: themeColor.withOpacity(0.2), width: 1),
-              borderRadius: BorderRadius.circular(4)),
-          ),
+              borderRadius: BorderRadius.circular(4))),
         )),
-        // Corner ornaments
         ..._corners(),
-        // Content
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              // Header
               Column(children: [
                 Text('CAVITE STATE UNIVERSITY',
-                    style: GoogleFonts.nunito(
-                        fontSize: 10, fontWeight: FontWeight.w800,
+                    style: GoogleFonts.nunito(fontSize: 10, fontWeight: FontWeight.w800,
                         color: themeColor, letterSpacing: 2.5),
                     textAlign: TextAlign.center),
                 const SizedBox(height: 2),
                 Text('Gender and Development Resource Center (GADRC)',
-                    style: GoogleFonts.nunito(
-                        fontSize: 8, color: Colors.grey[600], letterSpacing: 0.5),
+                    style: GoogleFonts.nunito(fontSize: 8, color: Colors.grey[600], letterSpacing: 0.5),
                     textAlign: TextAlign.center),
                 const SizedBox(height: 8),
                 Row(children: [
                   Expanded(child: Divider(color: themeColor.withOpacity(0.4), thickness: 1)),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                  Padding(padding: const EdgeInsets.symmetric(horizontal: 8),
                     child: Container(
                       width: 20, height: 20,
                       decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        border: Border.all(color: themeColor, width: 1.5)),
-                      child: Icon(Icons.eco_outlined, size: 12, color: themeColor),
-                    ),
-                  ),
+                          shape: BoxShape.circle,
+                          border: Border.all(color: themeColor, width: 1.5)),
+                      child: Icon(Icons.eco_outlined, size: 12, color: themeColor))),
                   Expanded(child: Divider(color: themeColor.withOpacity(0.4), thickness: 1)),
                 ]),
               ]),
-
-              // Title + Name
               Column(children: [
                 Text(certTitle,
-                    style: GoogleFonts.playfairDisplay(
-                        fontSize: 22, fontWeight: FontWeight.w700,
-                        color: const Color(0xFF1A2E1A)),
+                    style: GoogleFonts.playfairDisplay(fontSize: 22, fontWeight: FontWeight.w700,
+                        color: AppColors.primaryDark),
                     textAlign: TextAlign.center),
                 const SizedBox(height: 6),
                 Text('THIS IS TO CERTIFY THAT',
-                    style: GoogleFonts.nunito(
-                        fontSize: 7, color: Colors.grey[500], letterSpacing: 3),
+                    style: GoogleFonts.nunito(fontSize: 7, color: Colors.grey[500], letterSpacing: 3),
                     textAlign: TextAlign.center),
                 const SizedBox(height: 8),
                 Container(
@@ -717,44 +739,33 @@ class CertificateCard extends StatelessWidget {
                   decoration: const BoxDecoration(
                     border: Border(bottom: BorderSide(color: Color(0xFFC8E6C9), width: 2))),
                   child: Text(name,
-                      style: GoogleFonts.playfairDisplay(
-                          fontSize: 26, fontWeight: FontWeight.w700,
+                      style: GoogleFonts.playfairDisplay(fontSize: 26, fontWeight: FontWeight.w700,
                           color: themeColor, fontStyle: FontStyle.italic),
-                      textAlign: TextAlign.center),
-                ),
+                      textAlign: TextAlign.center)),
                 const SizedBox(height: 8),
-                Text(
-                  bodyText,
-                  style: GoogleFonts.nunito(
-                      fontSize: 8, color: Colors.grey[600], height: 1.5),
-                  textAlign: TextAlign.center,
-                  overflow: TextOverflow.clip,
-                ),
+                Text(bodyText,
+                    style: GoogleFonts.nunito(fontSize: 8, color: Colors.grey[600], height: 1.5),
+                    textAlign: TextAlign.center, overflow: TextOverflow.clip),
               ]),
-
-              // Footer
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Expanded(child: CertSignatureBlock(title: sig1Name, sub: sig1Title)),
-                  // Center seal + code
                   Flexible(child: Column(mainAxisSize: MainAxisSize.min, children: [
                     Container(
                       width: 40, height: 40,
                       decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        border: Border.all(color: themeColor, width: 2),
-                        color: const Color(0xFFE8F5E9)),
-                      child: Icon(Icons.verified_outlined, size: 16, color: themeColor),
-                    ),
+                          shape: BoxShape.circle,
+                          border: Border.all(color: themeColor, width: 2),
+                          color: const Color(0xFFE8F5E9)),
+                      child: Icon(Icons.verified_outlined, size: 16, color: themeColor)),
                     const SizedBox(height: 3),
                     Text('Certificate Code',
                         style: GoogleFonts.nunito(fontSize: 6, color: Colors.grey, letterSpacing: 0.5),
                         textAlign: TextAlign.center),
                     Text(code,
-                        style: GoogleFonts.nunito(
-                            fontSize: 8, fontWeight: FontWeight.w800,
+                        style: GoogleFonts.nunito(fontSize: 8, fontWeight: FontWeight.w800,
                             color: themeColor, letterSpacing: 1),
                         textAlign: TextAlign.center, overflow: TextOverflow.ellipsis),
                     Text('Issued: $issued',
@@ -774,8 +785,8 @@ class CertificateCard extends StatelessWidget {
   List<Widget> _corners() {
     const size = 16.0;
     return [
-      Positioned(top: 14, left: 14,  child: CertCorner(color: themeColor, size: size, flip: false, vert: false)),
-      Positioned(top: 14, right: 14, child: CertCorner(color: themeColor, size: size, flip: true,  vert: false)),
+      Positioned(top: 14, left: 14,     child: CertCorner(color: themeColor, size: size, flip: false, vert: false)),
+      Positioned(top: 14, right: 14,    child: CertCorner(color: themeColor, size: size, flip: true,  vert: false)),
       Positioned(bottom: 14, left: 14,  child: CertCorner(color: themeColor, size: size, flip: false, vert: true)),
       Positioned(bottom: 14, right: 14, child: CertCorner(color: themeColor, size: size, flip: true,  vert: true)),
     ];
@@ -786,13 +797,12 @@ class CertCorner extends StatelessWidget {
   final Color color;
   final double size;
   final bool flip, vert;
-  const CertCorner({required this.color, required this.size, required this.flip, required this.vert});
+  const CertCorner({super.key, required this.color, required this.size, required this.flip, required this.vert});
   @override
   Widget build(BuildContext context) => Transform.flip(
     flipX: flip, flipY: vert,
     child: SizedBox(width: size, height: size,
-      child: CustomPaint(painter: CertCornerPainter(color))),
-  );
+        child: CustomPaint(painter: CertCornerPainter(color))));
 }
 
 class CertCornerPainter extends CustomPainter {
@@ -809,38 +819,43 @@ class CertCornerPainter extends CustomPainter {
 
 class CertSignatureBlock extends StatelessWidget {
   final String title, sub;
-  const CertSignatureBlock({required this.title, required this.sub});
+  const CertSignatureBlock({super.key, required this.title, required this.sub});
   @override
-  Widget build(BuildContext context) => Column(mainAxisSize: MainAxisSize.min,
+  Widget build(BuildContext context) => Column(
+    mainAxisSize: MainAxisSize.min,
     crossAxisAlignment: CrossAxisAlignment.center,
     children: [
-    const Divider(color: Color(0xFF1A2E1A), thickness: 1),
-    Text(title, style: GoogleFonts.nunito(
-        fontSize: 7, fontWeight: FontWeight.w700,
-        color: const Color(0xFF1A2E1A), letterSpacing: 0.3),
-        textAlign: TextAlign.center, overflow: TextOverflow.ellipsis),
-    Text(sub, style: GoogleFonts.nunito(fontSize: 6, color: Colors.grey),
-        textAlign: TextAlign.center, overflow: TextOverflow.ellipsis),
-  ]);
+      Divider(color: AppColors.primaryDark, thickness: 1),
+      Text(title,
+          style: GoogleFonts.nunito(fontSize: 7, fontWeight: FontWeight.w700,
+              color: AppColors.primaryDark, letterSpacing: 0.3),
+          textAlign: TextAlign.center, overflow: TextOverflow.ellipsis),
+      Text(sub,
+          style: GoogleFonts.nunito(fontSize: 6, color: Colors.grey),
+          textAlign: TextAlign.center, overflow: TextOverflow.ellipsis),
+    ]);
 }
 
 // ─────────────────────────────────────────────────────────────────
 //  EMPTY STATE
 // ─────────────────────────────────────────────────────────────────
 class _EmptyState extends StatelessWidget {
-  final String icon, title, sub;
+  final IconData icon;
+  final String title, sub;
   const _EmptyState({required this.icon, required this.title, required this.sub});
   @override
   Widget build(BuildContext context) => Center(
     child: Padding(padding: const EdgeInsets.all(40),
       child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-        Text(icon, style: const TextStyle(fontSize: 48)),
+        Icon(icon, size: 48, color: Colors.grey[400]),
         const SizedBox(height: 12),
         Text(title, style: GoogleFonts.nunito(
             fontSize: 16, fontWeight: FontWeight.w700, color: Colors.grey[600])),
         const SizedBox(height: 6),
         Text(sub, textAlign: TextAlign.center,
             style: GoogleFonts.nunito(fontSize: 13, color: Colors.grey)),
-      ])),
+      ]
+      )
+    )
   );
 }

@@ -107,7 +107,7 @@ class BadgeModel {
   final String id;
   final String name;
   final String description;
-  final String icon;
+  final String icon; // Material icon name, e.g. 'military_tech' → use as Icons.military_tech in UI
   final bool earned;
   final int colorValue;
 
@@ -125,7 +125,7 @@ class BadgeModel {
       id:          map['id']?.toString() ?? '',
       name:        map['name'] ?? 'Badge',
       description: map['description'] ?? '',
-      icon:        map['icon'] ?? '🏅',
+      icon:        map['icon'] ?? 'military_tech',
       earned:      earned,
       colorValue:  0xFF40916C,
     );

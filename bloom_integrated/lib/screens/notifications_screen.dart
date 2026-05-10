@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../theme/app_theme.dart';
-import '../widgets/common_widgets.dart';
 
 final _supabase = Supabase.instance.client;
 
@@ -235,7 +234,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                                             ],
                                           ),
                                           const SizedBox(height: 4),
-                                          Text(a['body'] ?? a['content'] ?? a['content'] ?? a['content'] ?? '',
+                                          Text(a['body'] ?? a['content'] ?? '',
                                               maxLines: 2,
                                               overflow: TextOverflow.ellipsis,
                                               style: GoogleFonts.nunito(
@@ -295,7 +294,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                 style: GoogleFonts.nunito(
                     fontSize: 18, fontWeight: FontWeight.w900, color: AppColors.textDark)),
             const SizedBox(height: 8),
-            Text(a['body'] ?? a['content'] ?? a['content'] ?? a['content'] ?? '',
+            Text(a['body'] ?? a['content'] ?? '',
                 style: GoogleFonts.nunito(
                     fontSize: 14, color: AppColors.textMid, height: 1.6)),
             const SizedBox(height: 16),

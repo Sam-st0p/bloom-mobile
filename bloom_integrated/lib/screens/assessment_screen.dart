@@ -63,7 +63,7 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
         return;
       }
 
-      final assessment = assessments.first as Map<String, dynamic>;
+      final assessment = assessments.first;
 
       // Get questions with options
       final questions = await _supabase
@@ -238,9 +238,9 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return Scaffold(
+      return const Scaffold(
         backgroundColor: AppColors.background,
-        body: const Center(child: CircularProgressIndicator(color: AppColors.primary)),
+        body: Center(child: CircularProgressIndicator(color: AppColors.primary)),
       );
     }
 
@@ -255,7 +255,7 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Icon(Icons.quiz_outlined, size: 48, color: AppColors.textLight),
+                    const Icon(Icons.assignment_outlined, size: 48, color: AppColors.textLight),
                     const SizedBox(height: 12),
                     Text('No assessment available yet',
                         style: GoogleFonts.nunito(
@@ -521,8 +521,11 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
                           : AppColors.danger.withOpacity(0.1),
                     ),
                     child: Center(
-                      child: Text(_passed ? '🎉' : '📚',
-                          style: const TextStyle(fontSize: 44)),
+                      child: Icon(
+                        _passed ? Icons.emoji_events_rounded : Icons.menu_book_rounded,
+                        size: 44,
+                        color: _passed ? AppColors.primary : AppColors.danger,
+                      ),
                     ),
                   ),
                   const SizedBox(height: 20),
@@ -580,7 +583,11 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
                               color: AppColors.primary.withOpacity(0.1),
                               borderRadius: BorderRadius.circular(12),
                             ),
-                            child: const Text('✅', style: TextStyle(fontSize: 20)),
+                            child: Icon(
+                              Icons.check_circle_rounded,
+                              size: 24,
+                              color: AppColors.primary,
+                            ),
                           ),
                           const SizedBox(width: 14),
                           Expanded(

@@ -157,14 +157,14 @@ class _HomeScreenState extends State<HomeScreen> {
                           style: GoogleFonts.nunito(
                               color: Colors.white.withOpacity(0.7),
                               fontSize: 13)),
-                      Text('$_firstName 👋',
+                      Text('$_firstName',
                           style: GoogleFonts.nunito(
                               color: Colors.white,
                               fontSize: 22,
                               fontWeight: FontWeight.w900)),
                     ],
                   ),
-                  // Bell button — plain ElevatedButton, most reliable
+                  // Bell button
                   ElevatedButton(
                     onPressed: widget.onBellTap,
                     style: ElevatedButton.styleFrom(
@@ -232,19 +232,19 @@ class _HomeScreenState extends State<HomeScreen> {
                                   _StatBox(
                                       label: 'Modules',
                                       value: '$_completedModules/$_totalModules',
-                                      icon: '📚',
+                                      icon: Icons.menu_book_rounded,
                                       color: AppColors.primary),
                                   const SizedBox(width: 10),
                                   _StatBox(
                                       label: 'Badges',
                                       value: '$_badgeCount',
-                                      icon: '🏆',
+                                      icon: Icons.emoji_events_rounded,
                                       color: AppColors.accent),
                                   const SizedBox(width: 10),
                                   _StatBox(
                                       label: 'Seminars',
                                       value: '$_seminarCount',
-                                      icon: '🎓',
+                                      icon: Icons.school_rounded,
                                       color: AppColors.info),
                                 ]),
                                 const SizedBox(height: 14),
@@ -305,7 +305,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                                     fontSize: 13,
                                                     color: AppColors.textDark)),
                                             const SizedBox(height: 4),
-                                            Text(a['body'] ?? a['content'] ?? a['content'] ?? a['content'] ?? '',
+                                            Text(a['body'] ?? a['content'] ?? '',
                                                 maxLines: 2,
                                                 overflow: TextOverflow.ellipsis,
                                                 style: GoogleFonts.nunito(
@@ -493,7 +493,8 @@ class _HomeScreenState extends State<HomeScreen> {
 }
 
 class _StatBox extends StatelessWidget {
-  final String label, value, icon;
+  final String label, value;
+  final IconData icon;
   final Color color;
   const _StatBox(
       {required this.label,
@@ -509,7 +510,7 @@ class _StatBox extends StatelessWidget {
             borderRadius: BorderRadius.circular(14)),
         padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
         child: Column(children: [
-          Text(icon, style: const TextStyle(fontSize: 22)),
+          Icon(icon, color: color, size: 22),
           const SizedBox(height: 4),
           Text(value,
               style: GoogleFonts.nunito(

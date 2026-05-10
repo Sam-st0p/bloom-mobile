@@ -81,7 +81,6 @@ class _LoginScreenState extends State<LoginScreen> {
       );
       RateLimiter.reset('login');
 
-      // Login successful — show OTP verification
       if (mounted) {
         setState(() {
           _loading = false;
@@ -149,10 +148,22 @@ class _LoginScreenState extends State<LoginScreen> {
       builder: (_) => AlertDialog(
         shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(20)),
-        title: Text('Check your email 📬',
-            style: GoogleFonts.nunito(
-                fontWeight: FontWeight.w900,
-                color: AppColors.textDark)),
+        title: Row(children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: AppColors.primary.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(Icons.mark_email_read_outlined,
+                color: AppColors.primary, size: 20),
+          ),
+          const SizedBox(width: 10),
+          Text('Check your email',
+              style: GoogleFonts.nunito(
+                  fontWeight: FontWeight.w900,
+                  color: AppColors.textDark)),
+        ]),
         content: Text(
           'If an account exists for $email, a password reset link has been sent.\n\n'
           'Check your inbox and follow the link to reset your password.',
@@ -185,7 +196,6 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Show OTP screen after successful credentials check
     if (_showOtp) {
       return OtpScreen(
         email:      _email,
@@ -193,7 +203,6 @@ class _LoginScreenState extends State<LoginScreen> {
         onVerified: widget.onLogin,
         onBack: () => setState(() {
           _showOtp = false;
-          // Sign out the partial session so user can try again cleanly
           Supabase.instance.client.auth.signOut(
               scope: SignOutScope.local);
         }),
@@ -220,6 +229,7 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
             padding: const EdgeInsets.fromLTRB(32, 64, 32, 48),
             child: Column(children: [
+              // ── Logo icon replacing ⚧ emoji ───────────
               Container(
                 width: 76, height: 76,
                 decoration: BoxDecoration(
@@ -228,7 +238,13 @@ class _LoginScreenState extends State<LoginScreen> {
                   border: Border.all(
                       color: Colors.white.withOpacity(0.3), width: 1.5)),
                 child: const Center(
-                    child: Text('⚧', style: TextStyle(fontSize: 38)))),
+                  child: Icon(
+                    Icons.diversity_3_rounded,
+                    color: Colors.white,
+                    size: 38,
+                  ),
+                ),
+              ),
               const SizedBox(height: 16),
               Text('GADRC CvSU',
                   style: GoogleFonts.nunito(
@@ -249,7 +265,7 @@ class _LoginScreenState extends State<LoginScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Welcome back! 👋',
+                  Text('Welcome back!',
                       style: GoogleFonts.nunito(
                           fontSize: 22, fontWeight: FontWeight.w900,
                           color: AppColors.textDark)),

@@ -5,7 +5,6 @@ import 'home_screen.dart' hide LibraryScreen;
 import 'library_screen.dart';
 import 'events_screen.dart';
 import 'badges_screen.dart';
-import 'forum_screen.dart';
 import 'profile_screen.dart';
 import 'notifications_screen.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -64,7 +63,6 @@ class _MainShellState extends State<MainShell> {
       const LibraryScreen(),
       const EventsScreen(),
       const BadgesScreen(),
-      const ForumScreen(),
       ProfileScreen(onSignOut: widget.onSignOut),
     ];
 
@@ -89,9 +87,8 @@ class _MainShellState extends State<MainShell> {
                 _NavItem(icon: Icons.home_outlined, activeIcon: Icons.home_rounded, label: 'Home', index: 0, currentIndex: _currentIndex, onTap: _navigateTo),
                 _NavItem(icon: Icons.menu_book_outlined, activeIcon: Icons.menu_book_rounded, label: 'Library', index: 1, currentIndex: _currentIndex, onTap: _navigateTo),
                 _NavItem(icon: Icons.calendar_today_outlined, activeIcon: Icons.calendar_today_rounded, label: 'Events', index: 2, currentIndex: _currentIndex, onTap: _navigateTo),
-                _NavItem(icon: Icons.emoji_events_outlined, activeIcon: Icons.emoji_events_rounded, label: 'Badges', index: 3, currentIndex: _currentIndex, onTap: _navigateTo),
-                _NavItem(icon: Icons.chat_bubble_outline_rounded, activeIcon: Icons.chat_bubble_rounded, label: 'Forum', index: 4, currentIndex: _currentIndex, onTap: _navigateTo),
-                _NavItem(icon: Icons.person_outline_rounded, activeIcon: Icons.person_rounded, label: 'Profile', index: 5, currentIndex: _currentIndex, onTap: _navigateTo),
+                _NavItem(icon: Icons.emoji_events_outlined, activeIcon: Icons.emoji_events_rounded, label: 'Achievements', index: 3, currentIndex: _currentIndex, onTap: _navigateTo),
+                _NavItem(icon: Icons.person_outline_rounded, activeIcon: Icons.person_rounded, label: 'Profile', index: 4, currentIndex: _currentIndex, onTap: _navigateTo),
               ],
             ),
           ),
