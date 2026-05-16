@@ -1,15 +1,13 @@
+import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:share_plus/share_plus.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:image_gallery_saver/image_gallery_saver.dart';
-// ignore: avoid_web_libraries_in_flutter
-import 'dart:html' as html;
+import 'package:gal/gal.dart';
 import '../theme/app_theme.dart';
 
 final _db = Supabase.instance.client;
@@ -529,7 +527,7 @@ class _CertificateViewerScreenState extends State<CertificateViewerScreen> {
     return byteData?.buffer.asUint8List();
   }
 
-  /// Triggers a browser file download of the certificate PNG
+  /// Save certificate PNG to Android gallery
   Future<void> _saveToGallery() async {
     setState(() => _saving = true);
     try {
@@ -539,14 +537,16 @@ class _CertificateViewerScreenState extends State<CertificateViewerScreen> {
       final fileName =
           'BLOOM_GAD_${_code.replaceAll(RegExp(r'[^A-Za-z0-9]'), '_')}.png';
 
-      final blob   = html.Blob([bytes], 'image/png');
-      final url    = html.Url.createObjectUrlFromBlob(blob);
-      final anchor = html.AnchorElement(href: url)
-        ..setAttribute('download', fileName)
-        ..click();
-      html.Url.revokeObjectUrl(url);
+      // Write to temp file then save to gallery
+      final dir  = await getTemporaryDirectory();
+      final file = File('${dir.path}/$fileName');
+      await file.writeAsBytes(bytes);
+      await Gal.putImage(file.path);
 
-      _showSnack('✓ Certificate download started!', isSuccess: true);
+      // Clean up temp file
+      await file.delete();
+
+      if (mounted) _showSnack('✓ Certificate saved to gallery!', isSuccess: true);
     } catch (e) {
       if (mounted) _showSnack('Error: $e', isSuccess: false);
     } finally {
@@ -554,23 +554,31 @@ class _CertificateViewerScreenState extends State<CertificateViewerScreen> {
     }
   }
 
-  /// Share icon on web — just re-triggers the download
-  Future<void> _shareImage() => _saveToGallery();
+  /// Share certificate image via Android share sheet
+  Future<void> _shareImage() async {
+    try {
+      final bytes = await _capturePng();
+      if (bytes == null) throw Exception('Could not capture certificate.');
 
-  Future<void> _shareBytes(Uint8List bytes) async {
-    final fileName =
-        'BLOOM_GAD_${_code.replaceAll(RegExp(r'[^A-Za-z0-9]'), '_')}.png';
-    final blob   = html.Blob([bytes], 'image/png');
-    final url    = html.Url.createObjectUrlFromBlob(blob);
-    final anchor = html.AnchorElement(href: url)
-      ..setAttribute('download', fileName)
-      ..click();
-    html.Url.revokeObjectUrl(url);
+      final fileName =
+          'BLOOM_GAD_${_code.replaceAll(RegExp(r'[^A-Za-z0-9]'), '_')}.png';
+
+      final dir  = await getTemporaryDirectory();
+      final file = File('${dir.path}/$fileName');
+      await file.writeAsBytes(bytes);
+
+      await Share.shareXFiles(
+        [XFile(file.path, mimeType: 'image/png')],
+        subject: _certTitle,
+        text: 'My BLOOM GAD Certificate — $_code',
+      );
+
+      // Clean up temp file after sharing
+      await file.delete();
+    } catch (e) {
+      if (mounted) _showSnack('Error sharing: $e', isSuccess: false);
+    }
   }
-
-
-
-
 
   void _showSnack(String msg, {required bool isSuccess}) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -586,7 +594,7 @@ class _CertificateViewerScreenState extends State<CertificateViewerScreen> {
   Widget build(BuildContext context) {
     final screenW = MediaQuery.of(context).size.width;
     final certW   = screenW - 32;
-    final certH   = certW / 1.1;
+    final certH   = certW / 0.85;
 
     return Scaffold(
       backgroundColor: AppColors.primaryDark,
@@ -854,8 +862,7 @@ class _EmptyState extends StatelessWidget {
         const SizedBox(height: 6),
         Text(sub, textAlign: TextAlign.center,
             style: GoogleFonts.nunito(fontSize: 13, color: Colors.grey)),
-      ]
-      )
-    )
+      ]),
+    ),
   );
 }
