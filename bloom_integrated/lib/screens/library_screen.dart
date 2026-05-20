@@ -17,7 +17,7 @@ enum ProgressFilter { all, notStarted, inProgress, completed }
 
 class _LibraryFilters {
   final ProgressFilter progress;
-  final String? categoryName; // match against module.category string
+  final String? categoryName;
 
   const _LibraryFilters({
     this.progress = ProgressFilter.all,
@@ -63,13 +63,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
   _LibraryFilters _filters = const _LibraryFilters();
 
   ModuleModel? _selectedModule;
+  Map<String, dynamic>? _selectedRaw; // stores raw map with metadata
   List<Map<String, dynamic>> _moduleFiles = [];
   bool _loadingFiles = false;
 
   final _scrollController = ScrollController();
   final _searchCtrl = TextEditingController();
 
-  // Derived list of distinct category names from loaded modules
   List<String> get _categories {
     final cats = _modules.map((m) => m.category).where((c) => c.isNotEmpty).toSet().toList();
     cats.sort();
@@ -111,7 +111,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
       final modulesData = await _supabase
           .from('modules')
-          .select('*, categories(name)')
+          .select('*, categories(name), module_files(count), assessments(id), author, published_date, tags')
           .eq('status', 'published')
           .order('created_at', ascending: false)
           .range(0, _pageSize - 1);
@@ -156,7 +156,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
       final modulesData = await _supabase
           .from('modules')
-          .select('*, categories(name)')
+          .select('*, categories(name), module_files(count), assessments(id), author, published_date, tags')
           .eq('status', 'published')
           .order('created_at', ascending: false)
           .range(from, to);
@@ -179,9 +179,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 
   // ── Open module detail ─────────────────────────────────
-  Future<void> _openModule(ModuleModel module) async {
+  Future<void> _openModule(ModuleModel module, Map<String, dynamic> raw) async {
     setState(() {
       _selectedModule = module;
+      _selectedRaw    = raw;
       _loadingFiles   = true;
       _moduleFiles    = [];
     });
@@ -258,11 +259,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
     if (userId == null) return;
     try {
       await _supabase.from('module_progress').upsert({
-        'user_id':            userId,
-        'module_id':          moduleId,
-        'progress_percent':   pct,
-        'status':             pct == 100 ? 'completed' : 'in_progress',
-        'last_accessed_at':   DateTime.now().toIso8601String(),
+        'user_id':          userId,
+        'module_id':        moduleId,
+        'progress_percent': pct,
+        'status':           pct == 100 ? 'completed' : 'in_progress',
+        'last_accessed_at': DateTime.now().toIso8601String(),
       }, onConflict: 'user_id,module_id');
       await _load();
     } catch (_) {}
@@ -271,7 +272,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
   // ── Filtered list ──────────────────────────────────────
   List<ModuleModel> get _filtered {
     return _modules.where((m) {
-      // Search
       if (_search.isNotEmpty) {
         final q = _search.toLowerCase();
         if (!m.title.toLowerCase().contains(q) &&
@@ -279,14 +279,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
           return false;
         }
       }
-
-      // Category
       if (_filters.categoryName != null &&
           m.category != _filters.categoryName) {
         return false;
       }
-
-      // Progress status
       switch (_filters.progress) {
         case ProgressFilter.notStarted:
           if (m.progress > 0) return false;
@@ -300,7 +296,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
         default:
           break;
       }
-
       return true;
     }).toList();
   }
@@ -312,8 +307,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
     return count;
   }
 
-  void _clearFilters() {
-    setState(() => _filters = const _LibraryFilters());
+  void _clearFilters() => setState(() => _filters = const _LibraryFilters());
+
+  String _formatDate(String iso) {
+    try {
+      final d = DateTime.parse(iso);
+      const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      return '${d.day} ${months[d.month - 1]} ${d.year}';
+    } catch (_) { return iso; }
   }
 
   @override
@@ -326,7 +327,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
   Widget _buildLibrary() {
     return Column(
       children: [
-        // Header + search + filter row
         Container(
           color: Colors.white,
           padding: const EdgeInsets.fromLTRB(20, 20, 20, 14),
@@ -344,69 +344,63 @@ class _LibraryScreenState extends State<LibraryScreen> {
                           fontWeight: FontWeight.w900,
                           color: AppColors.textDark)),
                   const Spacer(),
-                  // Filter button with active badge
-                  Stack(
-                    children: [
-                      GestureDetector(
-                        onTap: _showFilterSheet,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 7),
-                          decoration: BoxDecoration(
-                            color: _filters.hasActiveFilters
-                                ? AppColors.primary.withOpacity(0.1)
-                                : AppColors.background,
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(
-                              color: _filters.hasActiveFilters
-                                  ? AppColors.primary
-                                  : AppColors.border,
-                              width: 1.5,
-                            ),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.tune_rounded,
-                                  size: 16,
-                                  color: _filters.hasActiveFilters
-                                      ? AppColors.primary
-                                      : AppColors.textMid),
-                              const SizedBox(width: 5),
-                              Text('Filter',
-                                  style: GoogleFonts.nunito(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w700,
-                                      color: _filters.hasActiveFilters
-                                          ? AppColors.primary
-                                          : AppColors.textMid)),
-                              if (_activeFilterCount > 0) ...[
-                                const SizedBox(width: 5),
-                                Container(
-                                  width: 17,
-                                  height: 17,
-                                  decoration: const BoxDecoration(
-                                      color: AppColors.primary,
-                                      shape: BoxShape.circle),
-                                  child: Center(
-                                    child: Text('$_activeFilterCount',
-                                        style: GoogleFonts.nunito(
-                                            fontSize: 10,
-                                            fontWeight: FontWeight.w800,
-                                            color: Colors.white)),
-                                  ),
-                                ),
-                              ],
-                            ],
-                          ),
+                  GestureDetector(
+                    onTap: _showFilterSheet,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 7),
+                      decoration: BoxDecoration(
+                        color: _filters.hasActiveFilters
+                            ? AppColors.primary.withOpacity(0.1)
+                            : AppColors.background,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: _filters.hasActiveFilters
+                              ? AppColors.primary
+                              : AppColors.border,
+                          width: 1.5,
                         ),
                       ),
-                    ],
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.tune_rounded,
+                              size: 16,
+                              color: _filters.hasActiveFilters
+                                  ? AppColors.primary
+                                  : AppColors.textMid),
+                          const SizedBox(width: 5),
+                          Text('Filter',
+                              style: GoogleFonts.nunito(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  color: _filters.hasActiveFilters
+                                      ? AppColors.primary
+                                      : AppColors.textMid)),
+                          if (_activeFilterCount > 0) ...[
+                            const SizedBox(width: 5),
+                            Container(
+                              width: 17,
+                              height: 17,
+                              decoration: const BoxDecoration(
+                                  color: AppColors.primary,
+                                  shape: BoxShape.circle),
+                              child: Center(
+                                child: Text('$_activeFilterCount',
+                                    style: GoogleFonts.nunito(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w800,
+                                        color: Colors.white)),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
                   ),
                 ],
               ),
               const SizedBox(height: 12),
-              // Search bar
               TextField(
                 controller: _searchCtrl,
                 onChanged: (v) => setState(() => _search = v),
@@ -444,10 +438,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
           ),
         ),
 
-        // Active filter chips row
         if (_filters.hasActiveFilters) _buildActiveFiltersRow(),
 
-        // Results count hint
         if (!_loading)
           Container(
             color: AppColors.background,
@@ -463,7 +455,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
             ),
           ),
 
-        // Module list
         Expanded(
           child: _loading
               ? const Center(
@@ -542,9 +533,17 @@ class _LibraryScreenState extends State<LibraryScreen> {
                                 ),
                               );
                             }
+                            final module = _filtered[i];
                             return _ModuleCard(
-                              module: _filtered[i],
-                              onTap: () => _openModule(_filtered[i]),
+                              module: module,
+                              onTap: () async {
+                                final raw = await _supabase
+                                    .from('modules')
+                                    .select('author, published_date, tags')
+                                    .eq('id', module.id)
+                                    .maybeSingle();
+                                _openModule(module, raw ?? {});
+                              },
                             );
                           },
                         ),
@@ -569,17 +568,15 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   if (_filters.progress != ProgressFilter.all)
                     _ActiveChip(
                       label: _progressLabel(_filters.progress),
-                      onRemove: () => setState(
-                          () => _filters = _filters.copyWith(
-                              progress: ProgressFilter.all)),
+                      onRemove: () => setState(() => _filters =
+                          _filters.copyWith(progress: ProgressFilter.all)),
                     ),
                   if (_filters.categoryName != null) ...[
                     const SizedBox(width: 6),
                     _ActiveChip(
                       label: _filters.categoryName!,
-                      onRemove: () => setState(
-                          () => _filters =
-                              _filters.copyWith(categoryName: null)),
+                      onRemove: () => setState(() =>
+                          _filters = _filters.copyWith(categoryName: null)),
                     ),
                   ],
                 ],
@@ -616,9 +613,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   String _progressLabel(ProgressFilter f) {
     switch (f) {
-      case ProgressFilter.notStarted:  return 'Not Started';
-      case ProgressFilter.inProgress:  return 'In Progress';
-      case ProgressFilter.completed:   return 'Completed';
+      case ProgressFilter.notStarted: return 'Not Started';
+      case ProgressFilter.inProgress: return 'In Progress';
+      case ProgressFilter.completed:  return 'Completed';
       default: return 'All';
     }
   }
@@ -626,6 +623,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
   // ── Module detail view ─────────────────────────────────
   Widget _buildModuleDetail(ModuleModel module) {
     final progress = _progressMap[module.id] ?? 0;
+    final raw      = _selectedRaw ?? {};
+    final author   = raw['author'] as String?;
+    final pubDate  = raw['published_date'] as String?;
+    final tags     = raw['tags'] as List?;
 
     return Column(
       children: [
@@ -644,7 +645,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
             children: [
               Row(children: [
                 IconButton(
-                  onPressed: () => setState(() => _selectedModule = null),
+                  onPressed: () =>
+                      setState(() { _selectedModule = null; _selectedRaw = null; }),
                   icon: const Icon(Icons.chevron_left, color: Colors.white),
                 ),
                 Expanded(
@@ -698,30 +700,68 @@ class _LibraryScreenState extends State<LibraryScreen> {
           child: ListView(
             padding: const EdgeInsets.all(16),
             children: [
-              if (module.description != null &&
-                  module.description!.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 14),
-                  child: AppCard(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('About this Module',
-                            style: GoogleFonts.nunito(
-                                fontWeight: FontWeight.w800,
-                                fontSize: 14,
-                                color: AppColors.textDark)),
-                        const SizedBox(height: 8),
-                        Text(module.description!,
-                            style: GoogleFonts.nunito(
-                                fontSize: 13,
-                                color: AppColors.textMid,
-                                height: 1.5)),
-                      ],
-                    ),
-                  ),
+              // About + Metadata card
+              AppCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('About this Module',
+                        style: GoogleFonts.nunito(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 14,
+                            color: AppColors.textDark)),
+                    const SizedBox(height: 8),
+                    if (module.description != null &&
+                        module.description!.isNotEmpty) ...[
+                      Text(module.description!,
+                          style: GoogleFonts.nunito(
+                              fontSize: 13,
+                              color: AppColors.textMid,
+                              height: 1.5)),
+                      const SizedBox(height: 12),
+                    ],
+                    // ── Metadata row ──
+                    if (author != null || pubDate != null) ...[
+                      const Divider(height: 1),
+                      const SizedBox(height: 12),
+                      Wrap(spacing: 16, runSpacing: 8, children: [
+                        if (author != null && author.isNotEmpty)
+                          _MetaChip(
+                              icon: Icons.person_outline, label: author),
+                        if (pubDate != null && pubDate.isNotEmpty)
+                          _MetaChip(
+                              icon: Icons.calendar_today_outlined,
+                              label: _formatDate(pubDate)),
+                      ]),
+                    ],
+                    // ── Tags ──
+                    if (tags != null && tags.isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      Wrap(spacing: 6, runSpacing: 6, children: [
+                        ...tags.map((tag) => Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: AppColors.primary.withOpacity(0.08),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                                color: AppColors.primary.withOpacity(0.2)),
+                          ),
+                          child: Text('#$tag',
+                              style: GoogleFonts.nunito(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppColors.primary)),
+                        )),
+                      ]),
+                    ],
+                  ],
                 ),
+              ),
 
+              const SizedBox(height: 12),
+
+              // Files card
               AppCard(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -818,6 +858,28 @@ class _LibraryScreenState extends State<LibraryScreen> {
 }
 
 // ─────────────────────────────────────────────
+// Metadata chip
+// ─────────────────────────────────────────────
+class _MetaChip extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  const _MetaChip({required this.icon, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(mainAxisSize: MainAxisSize.min, children: [
+      Icon(icon, size: 13, color: AppColors.primary),
+      const SizedBox(width: 5),
+      Text(label,
+          style: GoogleFonts.nunito(
+              fontSize: 12,
+              color: AppColors.textMid,
+              fontWeight: FontWeight.w600)),
+    ]);
+  }
+}
+
+// ─────────────────────────────────────────────
 // Active filter chip (dismissible)
 // ─────────────────────────────────────────────
 class _ActiveChip extends StatelessWidget {
@@ -845,8 +907,7 @@ class _ActiveChip extends StatelessWidget {
           const SizedBox(width: 5),
           GestureDetector(
             onTap: onRemove,
-            child: const Icon(Icons.close,
-                size: 14, color: AppColors.primary),
+            child: const Icon(Icons.close, size: 14, color: AppColors.primary),
           ),
         ],
       ),
@@ -894,7 +955,6 @@ class _FilterSheetState extends State<_FilterSheet> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Handle
           Center(
             child: Container(
               width: 40, height: 4,
@@ -904,7 +964,6 @@ class _FilterSheetState extends State<_FilterSheet> {
             ),
           ),
           const SizedBox(height: 20),
-
           Row(
             children: [
               Text('Filter Modules',
@@ -923,10 +982,7 @@ class _FilterSheetState extends State<_FilterSheet> {
               ),
             ],
           ),
-
           const SizedBox(height: 18),
-
-          // Progress status
           Text('Progress',
               style: GoogleFonts.nunito(
                   fontSize: 13,
@@ -966,8 +1022,6 @@ class _FilterSheetState extends State<_FilterSheet> {
               ),
             ],
           ),
-
-          // Category
           if (widget.categories.isNotEmpty) ...[
             const SizedBox(height: 20),
             Text('Category',
@@ -995,9 +1049,7 @@ class _FilterSheetState extends State<_FilterSheet> {
               ],
             ),
           ],
-
           const SizedBox(height: 28),
-
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
@@ -1060,8 +1112,7 @@ class _SheetChip extends StatelessWidget {
             if (icon != null) ...[
               Icon(icon,
                   size: 13,
-                  color:
-                      selected ? AppColors.primary : AppColors.textMid),
+                  color: selected ? AppColors.primary : AppColors.textMid),
               const SizedBox(width: 5),
             ],
             Text(label,
@@ -1069,9 +1120,8 @@ class _SheetChip extends StatelessWidget {
                     fontSize: 13,
                     fontWeight:
                         selected ? FontWeight.w700 : FontWeight.w500,
-                    color: selected
-                        ? AppColors.primary
-                        : AppColors.textMid)),
+                    color:
+                        selected ? AppColors.primary : AppColors.textMid)),
           ],
         ),
       ),
@@ -1120,10 +1170,11 @@ class _ModuleCard extends StatelessWidget {
                   const SizedBox(height: 4),
                   Row(
                     children: [
-                      if (module.progress == 100)
+                      if (module.progress == 100) ...[
                         const Icon(Icons.check_circle,
                             size: 11, color: AppColors.primary),
-                      if (module.progress == 100) const SizedBox(width: 3),
+                        const SizedBox(width: 3),
+                      ],
                       Text(
                         module.progress == 100
                             ? 'Completed'
@@ -1227,8 +1278,7 @@ class _FileTile extends StatelessWidget {
               ),
             ),
             Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               decoration: BoxDecoration(
                 color: AppColors.primary.withOpacity(0.1),
                 borderRadius: BorderRadius.circular(8),

@@ -5,7 +5,7 @@ publish_to: 'none'
 version: 1.0.0+1
 
 environment:
-  sdk: '>=3.0.0 <4.0.0'
+  sdk: '>=3.4.0 <4.0.0'
 
 dependencies:
   timeago: ^3.6.0
@@ -13,7 +13,7 @@ dependencies:
     sdk: flutter
 
   # UI & Fonts
-  google_fonts: ^6.1.0
+  google_fonts: ^8.1.0
   percent_indicator: ^4.2.3
   cached_network_image: ^3.3.1
   flutter_animate: ^4.3.0
@@ -22,12 +22,12 @@ dependencies:
   supabase_flutter: ^2.5.6
 
   # Environment
-  flutter_dotenv: ^5.1.0
+  flutter_dotenv: ^6.0.1
   url_launcher: ^6.3.2
 
   # Android features
   gal: ^2.3.0
-  share_plus: ^10.0.0
+  share_plus: ^13.1.0
   path_provider: ^2.1.0
   flutter_pdfview: ^1.3.2
   http: ^1.2.0
@@ -35,10 +35,7 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  flutter_lints: ^3.0.0
-
-dependency_overrides:
-  web: 0.5.1
+  flutter_lints: ^6.0.0
 
 flutter:
   uses-material-design: true
