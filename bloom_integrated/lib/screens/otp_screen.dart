@@ -10,13 +10,11 @@ import '../services/auth_service.dart';
 
 class OtpScreen extends StatefulWidget {
   final String       email;
-  final String       type; // 'signup' or 'login'
+  final String       type;
   final VoidCallback onVerified;
   final VoidCallback onBack;
-
-  // Only needed for signup
-  final String? fullName;
-  final String? studentId;
+  final String?      fullName;
+  final String?      studentId;
 
   const OtpScreen({
     super.key,
@@ -33,31 +31,31 @@ class OtpScreen extends StatefulWidget {
 }
 
 class _OtpScreenState extends State<OtpScreen> {
-  final List<TextEditingController> _controllers =
-      List.generate(6, (_) => TextEditingController());
-  final List<FocusNode> _focusNodes =
-      List.generate(6, (_) => FocusNode());
+  // Single hidden controller — simpler and more reliable
+  final TextEditingController _otpController = TextEditingController();
+  final FocusNode _focusNode = FocusNode();
 
-  bool    _loading   = false;
-  bool    _resending = false;
+  bool    _loading        = false;
+  bool    _resending      = false;
   String? _error;
-
-  int  _resendCooldown = 0;
-  bool _canResend      = false;
+  int     _resendCooldown = 0;
+  bool    _canResend      = false;
 
   @override
   void initState() {
     super.initState();
     _startResendCooldown(60);
-    for (final f in _focusNodes) {
-      f.addListener(() { if (mounted) setState(() {}); });
-    }
+    _otpController.addListener(() { if (mounted) setState(() {}); });
+    // Auto-focus
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _focusNode.requestFocus();
+    });
   }
 
   @override
   void dispose() {
-    for (final c in _controllers) { c.dispose(); }
-    for (final f in _focusNodes)  { f.dispose(); }
+    _otpController.dispose();
+    _focusNode.dispose();
     super.dispose();
   }
 
@@ -75,9 +73,8 @@ class _OtpScreenState extends State<OtpScreen> {
     });
   }
 
-  String get _otp => _controllers.map((c) => c.text).join();
+  String get _otp => _otpController.text;
 
-  // ── Verify OTP ─────────────────────────────────────────
   Future<void> _verify() async {
     if (_otp.length < 6) {
       setState(() => _error = 'Please enter the complete 6-digit code.');
@@ -92,7 +89,6 @@ class _OtpScreenState extends State<OtpScreen> {
         type:  OtpType.email,
       );
 
-      // Signup — save profile, sign out, show success dialog
       if (widget.type == 'signup' &&
           widget.fullName  != null &&
           widget.studentId != null) {
@@ -101,63 +97,48 @@ class _OtpScreenState extends State<OtpScreen> {
           fullName:  widget.fullName!,
           studentId: widget.studentId!,
         );
-        // Sign out temp session so user signs in fresh
-        await Supabase.instance.client.auth.signOut(
-            scope: SignOutScope.local);
+        await Supabase.instance.client.auth.signOut(scope: SignOutScope.local);
 
         if (mounted) {
           await showDialog(
             context: context,
             barrierDismissible: false,
             builder: (_) => AlertDialog(
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(20)),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Container(
-                    width: 64,
-                    height: 64,
+                    width: 64, height: 64,
                     decoration: BoxDecoration(
                       color: AppColors.primary.withOpacity(0.1),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(
-                      Icons.check_circle_rounded,
-                      color: AppColors.primary,
-                      size: 36,
-                    ),
+                      shape: BoxShape.circle),
+                    child: const Icon(Icons.check_circle_rounded,
+                        color: AppColors.primary, size: 36),
                   ),
                   const SizedBox(height: 16),
                   Text('Account Verified!',
                       style: GoogleFonts.nunito(
-                          fontSize: 20,
-                          fontWeight: FontWeight.w900,
+                          fontSize: 20, fontWeight: FontWeight.w900,
                           color: AppColors.textDark)),
                   const SizedBox(height: 8),
                   Text(
                     'Your account has been created successfully. Sign in to continue.',
                     textAlign: TextAlign.center,
                     style: GoogleFonts.nunito(
-                        fontSize: 13,
-                        color: AppColors.textLight,
-                        height: 1.5)),
+                        fontSize: 13, color: AppColors.textLight, height: 1.5)),
                 ],
               ),
               actions: [
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
-                    onPressed: () {
-                      Navigator.pop(context);
-                      widget.onVerified(); // goes to Sign In
-                    },
+                    onPressed: () { Navigator.pop(context); widget.onVerified(); },
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.primary,
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12)),
-                      padding:
-                          const EdgeInsets.symmetric(vertical: 14)),
+                      padding: const EdgeInsets.symmetric(vertical: 14)),
                     child: Text('Go to Sign In',
                         style: GoogleFonts.nunito(
                             color: Colors.white,
@@ -172,7 +153,6 @@ class _OtpScreenState extends State<OtpScreen> {
         return;
       }
 
-      // Login — update last sign in then go to home
       if (widget.type == 'login') {
         await AuthService.updateLastSignIn();
         if (mounted) widget.onVerified();
@@ -180,39 +160,29 @@ class _OtpScreenState extends State<OtpScreen> {
 
     } on AuthException catch (e) {
       if (mounted) {
-        setState(() {
-          _loading = false;
-          _error   = _friendlyError(e.message);
-        });
-        for (final c in _controllers) { c.clear(); }
+        setState(() { _loading = false; _error = _friendlyError(e.message); });
+        _otpController.clear();
         Future.delayed(const Duration(milliseconds: 100), () {
-          if (mounted) _focusNodes[0].requestFocus();
+          if (mounted) _focusNode.requestFocus();
         });
       }
     } catch (_) {
       if (mounted) {
-        setState(() {
-          _loading = false;
-          _error   = 'Verification failed. Please try again.';
-        });
+        setState(() { _loading = false; _error = 'Verification failed. Please try again.'; });
       }
     }
   }
 
-  // ── Resend OTP ─────────────────────────────────────────
   Future<void> _resend() async {
     if (!_canResend) return;
     setState(() { _resending = true; _error = null; });
     try {
       if (widget.type == 'signup') {
         await Supabase.instance.client.auth.resend(
-          type:  OtpType.signup,
-          email: widget.email,
-        );
+          type: OtpType.signup, email: widget.email);
       } else {
         await Supabase.instance.client.auth.signInWithOtp(
-          email: widget.email,
-        );
+          email: widget.email, shouldCreateUser: false);
       }
       if (mounted) {
         setState(() => _resending = false);
@@ -225,10 +195,7 @@ class _OtpScreenState extends State<OtpScreen> {
       }
     } catch (_) {
       if (mounted) {
-        setState(() {
-          _resending = false;
-          _error     = 'Failed to resend code. Please try again.';
-        });
+        setState(() { _resending = false; _error = 'Failed to resend code. Please try again.'; });
       }
     }
   }
@@ -241,31 +208,13 @@ class _OtpScreenState extends State<OtpScreen> {
     return 'Incorrect or expired code. Please try again.';
   }
 
-  void _onDigitChanged(int index, String value) {
-    if (value.length == 1) {
-      if (index < 5) {
-        Future.delayed(const Duration(milliseconds: 50), () {
-          if (mounted) _focusNodes[index + 1].requestFocus();
-        });
-      } else {
-        _focusNodes[index].unfocus();
-        Future.delayed(const Duration(milliseconds: 100), _verify);
-      }
-    } else if (value.isEmpty && index > 0) {
-      Future.delayed(const Duration(milliseconds: 50), () {
-        if (mounted) _focusNodes[index - 1].requestFocus();
-      });
-    }
-    setState(() {});
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
       body: Column(children: [
 
-        // ── Header ─────────────────────────────────────
+        // ── Header ──────────────────────────────────────────────────────
         Container(
           width: double.infinity,
           decoration: const BoxDecoration(
@@ -303,21 +252,13 @@ class _OtpScreenState extends State<OtpScreen> {
                 border: Border.all(
                     color: Colors.white.withOpacity(0.3), width: 1.5)),
               child: const Center(
-                child: Icon(
-                  Icons.lock_rounded,
-                  color: Colors.white,
-                  size: 36,
-                ),
-              ),
+                child: Icon(Icons.lock_rounded, color: Colors.white, size: 36)),
             ),
             const SizedBox(height: 16),
             Text(
-              widget.type == 'signup'
-                  ? 'Verify your email'
-                  : 'Two-step verification',
+              widget.type == 'signup' ? 'Verify your email' : 'Two-step verification',
               style: GoogleFonts.nunito(
-                  color: Colors.white, fontSize: 22,
-                  fontWeight: FontWeight.w900)),
+                  color: Colors.white, fontSize: 22, fontWeight: FontWeight.w900)),
             const SizedBox(height: 6),
             Text('GADRC CvSU',
                 style: GoogleFonts.nunito(
@@ -325,7 +266,7 @@ class _OtpScreenState extends State<OtpScreen> {
           ]),
         ),
 
-        // ── Body ───────────────────────────────────────
+        // ── Body ─────────────────────────────────────────────────────────
         Expanded(
           child: SingleChildScrollView(
             padding: const EdgeInsets.fromLTRB(24, 32, 24, 24),
@@ -340,107 +281,131 @@ class _OtpScreenState extends State<OtpScreen> {
                 RichText(
                   textAlign: TextAlign.center,
                   text: TextSpan(
-                    style: GoogleFonts.nunito(
-                        fontSize: 13, color: AppColors.textLight),
+                    style: GoogleFonts.nunito(fontSize: 13, color: AppColors.textLight),
                     children: [
                       const TextSpan(text: 'We sent a 6-digit code to\n'),
                       TextSpan(
                         text: widget.email,
                         style: GoogleFonts.nunito(
-                            color: AppColors.primary,
-                            fontWeight: FontWeight.w800)),
+                            color: AppColors.primary, fontWeight: FontWeight.w800)),
                     ]),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  widget.type == 'signup'
-                      ? 'Verify to complete your registration'
-                      : 'Enter the code to sign in',
-                  style: GoogleFonts.nunito(
-                      fontSize: 12, color: AppColors.textLight),
                 ),
                 const SizedBox(height: 32),
 
-                // ── Error banner ──────────────────────
+                // ── Error banner ──────────────────────────────────────────
                 if (_error != null) ...[
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
                       color: AppColors.danger.withOpacity(0.08),
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                          color: AppColors.danger.withOpacity(0.3))),
+                      border: Border.all(color: AppColors.danger.withOpacity(0.3))),
                     child: Row(children: [
-                      const Icon(Icons.error_outline,
-                          color: AppColors.danger, size: 18),
+                      const Icon(Icons.error_outline, color: AppColors.danger, size: 18),
                       const SizedBox(width: 8),
                       Expanded(child: Text(_error!,
-                          style: GoogleFonts.nunito(
-                              color: AppColors.danger, fontSize: 13))),
+                          style: GoogleFonts.nunito(color: AppColors.danger, fontSize: 13))),
                     ]),
                   ),
                   const SizedBox(height: 20),
                 ],
 
-                // ── 6 digit boxes ─────────────────────
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: List.generate(6, (i) {
-                    final isFocused = _focusNodes[i].hasFocus;
-                    final hasValue  = _controllers[i].text.isNotEmpty;
-                    return Container(
-                      width: 46, height: 56,
-                      margin: EdgeInsets.only(right: i < 5 ? 8 : 0),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(
-                          color: hasValue || isFocused
-                              ? AppColors.primary
-                              : AppColors.border,
-                          width: isFocused ? 2 : 1.5),
-                        boxShadow: [
-                          if (isFocused)
-                            BoxShadow(
-                              color: AppColors.primary.withOpacity(0.15),
-                              blurRadius: 8,
-                              offset: const Offset(0, 2)),
-                        ]),
-                      child: TextField(
-                        controller:   _controllers[i],
-                        focusNode:    _focusNodes[i],
-                        textAlign:    TextAlign.center,
-                        keyboardType: TextInputType.number,
-                        maxLength:    1,
-                        style: GoogleFonts.nunito(
-                            fontSize: 22,
-                            fontWeight: FontWeight.w900,
-                            color: AppColors.textDark),
-                        decoration: const InputDecoration(
-                          counterText:   '',
-                          border:        InputBorder.none,
-                          enabledBorder: InputBorder.none,
-                          focusedBorder: InputBorder.none),
-                        inputFormatters: [
-                          FilteringTextInputFormatter.digitsOnly],
-                        onChanged: (v) => _onDigitChanged(i, v),
+                // ── OTP boxes — responsive to screen width ────────────────
+                LayoutBuilder(builder: (context, constraints) {
+                  // Calculate box size based on available width
+                  // 6 boxes + 5 gaps(8px each) + padding
+                  final totalGaps = 5 * 8.0;
+                  final boxSize = ((constraints.maxWidth - totalGaps) / 6)
+                      .clamp(40.0, 64.0);
+                  final fontSize = (boxSize * 0.5).clamp(20.0, 32.0);
+
+                  return Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      // Hidden real text field for input
+                      SizedBox(
+                        width: 1,
+                        height: 1,
+                        child: TextField(
+                          controller:   _otpController,
+                          focusNode:    _focusNode,
+                          keyboardType: TextInputType.number,
+                          maxLength:    6,
+                          autofocus:    true,
+                          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                          decoration: const InputDecoration(
+                            border: InputBorder.none,
+                            counterText: ''),
+                          onChanged: (v) {
+                            setState(() {});
+                            if (v.length == 6) {
+                              Future.delayed(const Duration(milliseconds: 100), _verify);
+                            }
+                          },
+                        ),
                       ),
-                    );
-                  }),
-                ),
+
+                      // Visual boxes
+                      GestureDetector(
+                        onTap: () => _focusNode.requestFocus(),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: List.generate(6, (i) {
+                            final digit = i < _otp.length ? _otp[i] : '';
+                            final isActive = _focusNode.hasFocus && i == _otp.length;
+
+                            return Container(
+                              width:  boxSize,
+                              height: boxSize * 1.2,
+                              margin: EdgeInsets.only(right: i < 5 ? 8 : 0),
+                              decoration: BoxDecoration(
+                                color: digit.isNotEmpty
+                                    ? AppColors.primaryDark.withOpacity(0.07)
+                                    : Colors.white,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: digit.isNotEmpty
+                                      ? AppColors.primary
+                                      : isActive
+                                          ? AppColors.primary
+                                          : AppColors.border,
+                                  width: isActive || digit.isNotEmpty ? 2.0 : 1.5),
+                                boxShadow: isActive ? [
+                                  BoxShadow(
+                                    color: AppColors.primary.withOpacity(0.2),
+                                    blurRadius: 8,
+                                    offset: const Offset(0, 2)),
+                                ] : null,
+                              ),
+                              child: Center(
+                                child: Text(
+                                  digit,
+                                  style: GoogleFonts.nunito(
+                                      fontSize: fontSize,
+                                      fontWeight: FontWeight.w900,
+                                      color: AppColors.primaryDark,
+                                      height: 1.0),
+                                ),
+                              ),
+                            );
+                          }),
+                        ),
+                      ),
+                    ],
+                  );
+                }),
+
                 const SizedBox(height: 32),
 
-                // ── Verify button ─────────────────────
+                // ── Verify button ─────────────────────────────────────────
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
-                    onPressed: _loading || _otp.length < 6
-                        ? null : _verify,
+                    onPressed: _loading || _otp.length < 6 ? null : _verify,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.primary,
                       foregroundColor: Colors.white,
-                      disabledBackgroundColor:
-                          AppColors.primary.withOpacity(0.4),
+                      disabledBackgroundColor: AppColors.primary.withOpacity(0.4),
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(16)),
                       padding: const EdgeInsets.symmetric(vertical: 16),
@@ -452,13 +417,12 @@ class _OtpScreenState extends State<OtpScreen> {
                                 color: Colors.white, strokeWidth: 2.5))
                         : Text('Verify Code',
                             style: GoogleFonts.nunito(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w800)),
+                                fontSize: 16, fontWeight: FontWeight.w800)),
                   ),
                 ),
                 const SizedBox(height: 20),
 
-                // ── Resend ────────────────────────────
+                // ── Resend ────────────────────────────────────────────────
                 if (_canResend)
                   TextButton(
                     onPressed: _resending ? null : _resend,
@@ -477,7 +441,7 @@ class _OtpScreenState extends State<OtpScreen> {
                           fontSize: 13, color: AppColors.textLight)),
                 const SizedBox(height: 16),
 
-                // ── Hint ──────────────────────────────
+                // ── Hint ──────────────────────────────────────────────────
                 Container(
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
@@ -486,20 +450,15 @@ class _OtpScreenState extends State<OtpScreen> {
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Icon(
-                        Icons.info_outline_rounded,
-                        color: AppColors.primary,
-                        size: 18,
-                      ),
+                      const Icon(Icons.info_outline_rounded,
+                          color: AppColors.primary, size: 18),
                       const SizedBox(width: 10),
                       Expanded(child: Text(
                         widget.type == 'signup'
                             ? 'Check your inbox and spam folder. Once verified, tap "Go to Sign In" to continue.'
                             : 'Check your inbox and spam folder. The code expires in 10 minutes.',
                         style: GoogleFonts.nunito(
-                            fontSize: 12,
-                            color: AppColors.textMid,
-                            height: 1.5))),
+                            fontSize: 12, color: AppColors.textMid, height: 1.5))),
                     ]),
                 ),
               ],

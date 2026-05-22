@@ -1,5 +1,5 @@
 // lib/screens/signup_screen.dart
-// BLOOM GAD Mobile App — Signup Screen
+// BLOOM GAD Mobile App – Signup Screen
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -52,7 +52,7 @@ class _SignupScreenState extends State<SignupScreen> {
     super.dispose();
   }
 
-  // ── Validation ─────────────────────────────────────────
+  // ── Validation ─────────────────────────────────────────────────
   String? _validate() {
     if (_firstNameCtrl.text.trim().isEmpty) return 'Please enter your First Name.';
     if (_lastNameCtrl.text.trim().isEmpty)  return 'Please enter your Last Name.';
@@ -64,12 +64,12 @@ class _SignupScreenState extends State<SignupScreen> {
     if (emailError != null) return emailError;
     final passError = AppValidators.password(_passCtrl.text);
     if (passError != null) return passError;
-    if (_confirmCtrl.text.isEmpty)              return 'Please confirm your password.';
-    if (_passCtrl.text != _confirmCtrl.text)    return 'Passwords do not match.';
+    if (_confirmCtrl.text.isEmpty)           return 'Please confirm your password.';
+    if (_passCtrl.text != _confirmCtrl.text) return 'Passwords do not match.';
     return null;
   }
 
-  // ── Signup handler ─────────────────────────────────────
+  // ── Signup handler ─────────────────────────────────────────────
   Future<void> _handleSignup() async {
     final validationError = _validate();
     if (validationError != null) {
@@ -106,6 +106,22 @@ class _SignupScreenState extends State<SignupScreen> {
     }
   }
 
+  // ── Google Sign-In handler ─────────────────────────────────────
+  Future<void> _handleGoogleSignIn() async {
+    setState(() { _loading = true; _error = null; });
+    try {
+      final error = await AuthService.signInWithGoogle();
+      if (!mounted) return;
+      if (error == null) {
+        widget.onSignup();
+      } else if (error != 'Google sign-in cancelled.') {
+        setState(() => _error = error);
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
   String _friendlyError(String raw) {
     final r = raw.toLowerCase();
     if (r.contains('already registered') || r.contains('already exists')) {
@@ -121,7 +137,6 @@ class _SignupScreenState extends State<SignupScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Show OTP screen after account creation
     if (_showOtp) {
       return OtpScreen(
         email:      _email,
@@ -137,7 +152,7 @@ class _SignupScreenState extends State<SignupScreen> {
       backgroundColor: AppColors.background,
       body: Column(
         children: [
-          // ── Header ────────────────────────────────────
+          // ── Header ─────────────────────────────────────────────
           Container(
             decoration: const BoxDecoration(
               gradient: LinearGradient(
@@ -175,7 +190,7 @@ class _SignupScreenState extends State<SignupScreen> {
             ),
           ),
 
-          // ── Form ──────────────────────────────────────
+          // ── Form ───────────────────────────────────────────────
           Expanded(
             child: SingleChildScrollView(
               padding: const EdgeInsets.all(24),
@@ -193,7 +208,64 @@ class _SignupScreenState extends State<SignupScreen> {
                           fontSize: 13, color: AppColors.textLight)),
                   const SizedBox(height: 24),
 
-                  // ── Error banner ───────────────────────
+                  // ── Google Sign-Up button ──────────────────────
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton(
+                      onPressed: _loading ? null : _handleGoogleSignIn,
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        side: BorderSide(
+                            color: AppColors.textLight.withOpacity(0.4)),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16)),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 20, height: 20,
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(4),
+                              border: Border.all(
+                                  color: Colors.grey.shade300),
+                            ),
+                            child: const Center(
+                              child: Text('G',
+                                  style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w700,
+                                      color: Color(0xFF4285F4))),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Text('Continue with Google',
+                              style: GoogleFonts.nunito(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppColors.textDark)),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+
+                  // ── OR divider ─────────────────────────────────
+                  Row(children: [
+                    const Expanded(child: Divider()),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      child: Text('or sign up with email',
+                          style: GoogleFonts.nunito(
+                              color: AppColors.textLight, fontSize: 13)),
+                    ),
+                    const Expanded(child: Divider()),
+                  ]),
+                  const SizedBox(height: 20),
+
+                  // ── Error banner ───────────────────────────────
                   if (_error != null) ...[
                     Container(
                       padding: const EdgeInsets.all(12),
@@ -215,7 +287,7 @@ class _SignupScreenState extends State<SignupScreen> {
                     const SizedBox(height: 16),
                   ],
 
-                  // ── Name ──────────────────────────────
+                  // ── Name ───────────────────────────────────────
                   _buildLabel('NAME'),
                   const SizedBox(height: 8),
                   Row(children: [
@@ -231,7 +303,7 @@ class _SignupScreenState extends State<SignupScreen> {
                   ]),
                   const SizedBox(height: 16),
 
-                  // ── Student ID ────────────────────────
+                  // ── Student ID ─────────────────────────────────
                   _buildLabel('STUDENT ID'),
                   const SizedBox(height: 8),
                   _buildTextField(
@@ -240,7 +312,7 @@ class _SignupScreenState extends State<SignupScreen> {
                       icon: Icons.badge_outlined),
                   const SizedBox(height: 16),
 
-                  // ── Email ─────────────────────────────
+                  // ── Email ──────────────────────────────────────
                   _buildLabel('EMAIL ADDRESS'),
                   const SizedBox(height: 8),
                   _buildTextField(
@@ -250,7 +322,7 @@ class _SignupScreenState extends State<SignupScreen> {
                       inputType: TextInputType.emailAddress),
                   const SizedBox(height: 16),
 
-                  // ── Password ──────────────────────────
+                  // ── Password ───────────────────────────────────
                   _buildLabel('PASSWORD'),
                   const SizedBox(height: 8),
                   TextField(
@@ -291,7 +363,7 @@ class _SignupScreenState extends State<SignupScreen> {
                   _buildPasswordStrengthBar(_passCtrl.text),
                   const SizedBox(height: 16),
 
-                  // ── Confirm Password ──────────────────
+                  // ── Confirm Password ───────────────────────────
                   _buildLabel('CONFIRM PASSWORD'),
                   const SizedBox(height: 8),
                   TextField(
@@ -330,7 +402,7 @@ class _SignupScreenState extends State<SignupScreen> {
                   ),
                   const SizedBox(height: 20),
 
-                  // ── Info note ─────────────────────────
+                  // ── Info note ──────────────────────────────────
                   Container(
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
@@ -353,7 +425,7 @@ class _SignupScreenState extends State<SignupScreen> {
                   ),
                   const SizedBox(height: 20),
 
-                  // ── Create Account button ─────────────
+                  // ── Create Account button ──────────────────────
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton.icon(
@@ -383,7 +455,7 @@ class _SignupScreenState extends State<SignupScreen> {
                   ),
                   const SizedBox(height: 16),
 
-                  // ── Sign in link ──────────────────────
+                  // ── Sign in link ───────────────────────────────
                   Center(
                     child: GestureDetector(
                       onTap: widget.onGoLogin,
@@ -455,8 +527,7 @@ class _SignupScreenState extends State<SignupScreen> {
     return TextField(
       controller: ctrl,
       keyboardType: inputType,
-      style:
-          GoogleFonts.nunito(fontSize: 14, color: AppColors.textDark),
+      style: GoogleFonts.nunito(fontSize: 14, color: AppColors.textDark),
       decoration: InputDecoration(
         hintText: hint,
         hintStyle: GoogleFonts.nunito(color: AppColors.textLight),
