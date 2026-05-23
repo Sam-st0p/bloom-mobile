@@ -5,9 +5,12 @@ class ModuleModel {
   final int progress;
   final String status;
   final int colorValue;
-  final int pages;        // kept for library_screen compatibility
-  final bool hasBadge;    // kept for library_screen compatibility
+  final int pages;
+  final bool hasBadge;
   final String? description;
+  final String? author;
+  final String? publishedDate;
+  final List<String>? tags;
 
   const ModuleModel({
     required this.id,
@@ -19,19 +22,31 @@ class ModuleModel {
     this.pages = 0,
     this.hasBadge = false,
     this.description,
+    this.author,
+    this.publishedDate,
+    this.tags,
   });
 
   factory ModuleModel.fromMap(Map<String, dynamic> map, {int progress = 0}) {
+    // Parse tags — stored as PostgreSQL array (List) or null
+    List<String>? tags;
+    if (map['tags'] != null) {
+      tags = (map['tags'] as List).map((t) => t.toString()).toList();
+    }
+
     return ModuleModel(
-      id:          map['id']?.toString() ?? '',
-      title:       map['title'] ?? 'Untitled Module',
-      category:    map['categories']?['name'] ?? map['category'] ?? 'General',
-      progress:    progress,
-      status:      map['status'] ?? 'published',
-      colorValue:  0xFF40916C,
-      pages:       map['pages'] ?? 0,
-      hasBadge:    progress == 100,
-      description: map['description'] as String?,
+      id:            map['id']?.toString() ?? '',
+      title:         map['title'] ?? 'Untitled Module',
+      category:      map['categories']?['name'] ?? map['category'] ?? 'General',
+      progress:      progress,
+      status:        map['status'] ?? 'published',
+      colorValue:    0xFF40916C,
+      pages:         map['pages'] ?? 0,
+      hasBadge:      progress == 100,
+      description:   map['description'] as String?,
+      author:        map['author'] as String?,
+      publishedDate: map['published_date'] as String?,
+      tags:          tags,
     );
   }
 }
@@ -107,7 +122,7 @@ class BadgeModel {
   final String id;
   final String name;
   final String description;
-  final String icon; // Material icon name, e.g. 'military_tech' → use as Icons.military_tech in UI
+  final String icon;
   final bool earned;
   final int colorValue;
 
@@ -160,7 +175,6 @@ class CertificateModel {
   }
 }
 
-// ForumPost uses String id throughout to match updated models
 class ForumPost {
   final String id;
   final String title;
