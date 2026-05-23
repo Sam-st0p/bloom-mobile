@@ -23,7 +23,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   final _supabase = Supabase.instance.client;
 
-  String _firstName = 'Student';
+  String _firstName = '';
   int _completedModules = 0;
   int _totalModules = 0;
   int _badgeCount = 0;
@@ -46,11 +46,11 @@ class _HomeScreenState extends State<HomeScreen> {
       final userId = _supabase.auth.currentUser?.id;
       if (userId == null) return;
 
-      final profile = await _supabase
-          .from('profiles')
-          .select('full_name')
-          .eq('id', userId)
-          .maybeSingle();
+     final profile = await _supabase
+    .from('profiles')
+    .select('full_name, role')
+    .eq('id', userId)
+    .maybeSingle();
 
       final modulesData = await _supabase
           .from('modules')
@@ -100,7 +100,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
       if (mounted) {
         setState(() {
-          final fullName = profile?['full_name'] as String? ?? 'Student';
+          final fullName = profile?['full_name'] as String? ?? '';
           _firstName = fullName.split(' ').first;
           _totalModules = allModules.length;
           _completedModules = allModules.where((m) => m.progress == 100).length;

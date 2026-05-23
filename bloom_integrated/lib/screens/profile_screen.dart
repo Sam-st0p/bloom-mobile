@@ -36,7 +36,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final _nameCtrl      = TextEditingController();
   final _studentIdCtrl = TextEditingController();
   final _deptCtrl      = TextEditingController();
-  int   _yearLevel     = 1;
+  int     _yearLevel    = 1;
+  String? _selectedRole;
 
   @override
   void initState() { super.initState(); _load(); }
@@ -94,6 +95,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _studentIdCtrl.text = profile?['student_id'] ?? '';
           _deptCtrl.text      = profile?['department'] ?? '';
           _yearLevel          = profile?['year_level'] ?? 1;
+          _selectedRole       = profile?['role'] as String?;
           _loading = false;
         });
       }
@@ -105,6 +107,42 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _saveProfile() async {
     final userId = _supabase.auth.currentUser?.id;
     if (userId == null) return;
+
+    // If role changed, show confirmation dialog first
+    final currentRole = _profileData?['role'] as String?;
+    if (_selectedRole != currentRole) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Text('Change Role?',
+              style: GoogleFonts.nunito(fontWeight: FontWeight.w900)),
+          content: Text(
+            'You are changing your role to "${_selectedRole != null ? _selectedRole![0].toUpperCase() + _selectedRole!.substring(1) : 'None'}". This may affect your access. Continue?',
+            style: GoogleFonts.nunito(fontSize: 13),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text('Cancel',
+                  style: GoogleFonts.nunito(color: AppColors.textMid)),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10))),
+              child: Text('Confirm',
+                  style: GoogleFonts.nunito(
+                      color: Colors.white, fontWeight: FontWeight.w700)),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+    }
+
     setState(() => _saving = true);
     try {
       await _supabase.from('profiles').update({
@@ -112,6 +150,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         'student_id': _studentIdCtrl.text.trim(),
         'department': _deptCtrl.text.trim(),
         'year_level': _yearLevel,
+        'role':       _selectedRole,
         'updated_at': DateTime.now().toIso8601String(),
       }).eq('id', userId);
       await _load();
@@ -127,12 +166,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
     widget.onSignOut();
   }
 
-  String get _displayName => _profileData?['full_name'] ?? 'Student';
-  String get _initials {
-    final parts = _displayName.trim().split(' ');
-    if (parts.length >= 2) return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
-    return _displayName.isNotEmpty ? _displayName[0].toUpperCase() : '?';
-  }
+  String get _displayName => _loading
+    ? ''
+    : (_profileData?['full_name'] as String? ?? '').trim();
+ String get _initials {
+  if (_loading || _displayName.isEmpty) return '•';
+  final parts = _displayName.trim().split(' ');
+  if (parts.length >= 2) return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
+  return _displayName[0].toUpperCase();
+}
   String get _department => _profileData?['department'] ?? '';
   String get _studentId  => _profileData?['student_id'] ?? '';
   String get _yearLabel {
@@ -489,6 +531,41 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       );
                     }),
                   ),
+                  const SizedBox(height: 12),
+                  Text('Role',
+                      style: GoogleFonts.nunito(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textMid,
+                          letterSpacing: 0.5)),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: ['student', 'teacher', 'faculty', 'speaker', 'guest'].map((r) {
+                      final selected = _selectedRole == r;
+                      return GestureDetector(
+                        onTap: () => setState(() => _selectedRole = r),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: selected ? AppColors.primary : AppColors.background,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                                color: selected ? AppColors.primary : AppColors.border,
+                                width: 1.5),
+                          ),
+                          child: Text(
+                            r[0].toUpperCase() + r.substring(1),
+                            style: GoogleFonts.nunito(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 13,
+                                color: selected ? Colors.white : AppColors.textMid),
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
                 ],
               ),
             ),
@@ -630,12 +707,12 @@ class _HorizontalSection extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────
-//  CERTIFICATE PREVIEW CARD  (achievement-tile style, non-tappable)
+//  CERTIFICATE PREVIEW CARD
 // ─────────────────────────────────────────────────────────────────
 class _CertPreviewCard extends StatelessWidget {
   final Map<String, dynamic> cert;
   final String fullName;
-  final VoidCallback onTap; // kept for signature compatibility, unused
+  final VoidCallback onTap;
 
   const _CertPreviewCard({
     required this.cert,
@@ -672,7 +749,6 @@ class _CertPreviewCard extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          // Icon container — mirrors badge tile style
           Container(
             width: 52,
             height: 52,
