@@ -1,41 +1,28 @@
 // lib/main.dart
-// BLOOM GAD Mobile App
+// BLOOM GAD Mobile App — Main entry point + AuthGate
 
 import 'dart:async';
-import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
 import 'theme/app_theme.dart';
 import 'screens/login_screen.dart';
 import 'screens/signup_screen.dart';
 import 'screens/otp_screen.dart';
-import 'screens/main_shell.dart';
 import 'screens/role_selection_screen.dart';
-import 'services/auth_service.dart';
+import 'screens/reset_password_screen.dart';
+import 'screens/main_shell.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
-  final configString = await rootBundle.loadString('assets/config.json');
-  final config = jsonDecode(configString) as Map<String, dynamic>;
-
-  final supabaseUrl     = config['SUPABASE_URL']     as String?;
-  final supabaseAnonKey = config['SUPABASE_ANON_KEY'] as String?;
-
-  assert(supabaseUrl     != null && supabaseUrl.isNotEmpty,
-      'SUPABASE_URL is missing in config.json');
-  assert(supabaseAnonKey != null && supabaseAnonKey.isNotEmpty,
-      'SUPABASE_ANON_KEY is missing in config.json');
-
-  await Supabase.initialize(url: supabaseUrl!, anonKey: supabaseAnonKey!);
-
-  SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
-  SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
-    statusBarColor:          AppColors.primaryDark,
-    statusBarIconBrightness: Brightness.light,
-  ));
-
+ await Supabase.initialize(
+  url:     'https://vfpgzuehfebhawlidhsz.supabase.co',
+  anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZmcGd6dWVoZmViaGF3bGlkaHN6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMwMjk4ODMsImV4cCI6MjA4ODYwNTg4M30.ZzaOTYxShnwwLDMNH1uZKb59lYsB6pnNk1mPik2VRR0',
+  authOptions: const FlutterAuthClientOptions(
+    authFlowType: AuthFlowType.implicit,
+  ),
+);
   runApp(const BloomApp());
 }
 
@@ -45,41 +32,72 @@ class BloomApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title:                      'BLOOM — GADRC CvSU',
+      title:                      'BLOOM GAD',
       debugShowCheckedModeBanner: false,
-      theme:                      AppTheme.theme,
-      home:                       const AuthGate(),
+      theme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF2E7D32)),
+        useMaterial3: true,
+      ),
+      home: const AuthGate(),
     );
   }
 }
 
-enum _AuthStatus { loading, unauthenticated, needsRole, authenticated }
+// ── Auth status ───────────────────────────────────────────────────────────────
+enum _AuthStatus {
+  loading,
+  unauthenticated,
+  needsRole,
+  authenticated,
+  passwordRecovery,
+}
 
+// ── Recovery URL detection ────────────────────────────────────────────────────
+// Supabase puts tokens in the hash fragment after verifying the recovery link:
+//   http://localhost:8080/#access_token=...&type=recovery
+// We check BOTH fragment and query params to be safe.
+bool _isRecoveryUrl() {
+  if (!kIsWeb) return false;
+
+  debugPrint('🔍 BASE URI:  ${Uri.base}');
+  debugPrint('🔍 FRAGMENT:  ${Uri.base.fragment}');
+  debugPrint('🔍 QUERY:     ${Uri.base.queryParameters}');
+
+  // Implicit flow: token arrives in hash fragment
+  //   http://localhost:8080/#access_token=...&type=recovery
+  final fragment = Uri.base.fragment;
+  if (fragment.isNotEmpty) {
+    final params = Uri.splitQueryString(fragment);
+    debugPrint('🔍 FRAGMENT PARAMS: $params');
+    if (params['type'] == 'recovery') return true;
+  }
+
+  // PKCE flow: code arrives as query param, type also in query
+  //   http://localhost:8080/?code=...&type=recovery  (some Supabase versions)
+  final query = Uri.base.queryParameters;
+  debugPrint('🔍 QUERY PARAMS: $query');
+  if (query['type'] == 'recovery') return true;
+
+  return false;
+}
+
+// ── AuthGate ──────────────────────────────────────────────────────────────────
 class AuthGate extends StatefulWidget {
   const AuthGate({super.key});
+
   @override
   State<AuthGate> createState() => _AuthGateState();
 }
 
 class _AuthGateState extends State<AuthGate> {
-  _AuthStatus _status        = _AuthStatus.loading;
-  int         _pendingCheckId = 0;
-  StreamSubscription<AuthState>? _authSub;
+  _AuthStatus         _status  = _AuthStatus.loading;
+  StreamSubscription? _authSub;
+  int                 _checkId = 0;
 
   @override
   void initState() {
     super.initState();
-
-    _authSub = Supabase.instance.client.auth.onAuthStateChange.listen(
-      (data) {
-        // Ignore token refreshes — they don't change auth state.
-        if (data.event == AuthChangeEvent.tokenRefreshed) return;
-        _handleAuthChange(data.session);
-      },
-    );
-
-    // Evaluate existing session on cold start / page reload.
-    _handleAuthChange(Supabase.instance.client.auth.currentSession);
+    _initAuth();
   }
 
   @override
@@ -88,209 +106,238 @@ class _AuthGateState extends State<AuthGate> {
     super.dispose();
   }
 
-  Future<void> _handleAuthChange(Session? session) async {
-    final myId = ++_pendingCheckId;
-    if (!mounted) return;
+  Future<void> _initAuth() async {
+    debugPrint('🚀 _initAuth() called');
 
-    if (session == null) {
-      if (myId == _pendingCheckId && mounted) {
-        setState(() => _status = _AuthStatus.unauthenticated);
-      }
+    // ── Priority 1: Recovery URL check ──────────────────────────────────
+    // Must happen before ANYTHING else — before session check, before
+    // subscribing to auth events. The hash fragment is available immediately
+    // on page load, before Supabase processes it.
+    if (_isRecoveryUrl()) {
+      debugPrint('✅ Recovery URL detected in _initAuth — showing ResetPasswordScreen');
+      if (mounted) setState(() => _status = _AuthStatus.passwordRecovery);
+      _subscribeToAuthEvents();
       return;
     }
 
-    if (_status != _AuthStatus.loading) {
-      if (myId == _pendingCheckId && mounted) {
-        setState(() => _status = _AuthStatus.loading);
-      }
+    // ── Priority 2: Subscribe first, THEN check session ─────────────────
+    // Subscribe before session check so we don't miss events that fire
+    // during the async gap between subscribe and session resolution.
+    _subscribeToAuthEvents();
+
+    // ── Priority 3: Existing session check ──────────────────────────────
+    final session = Supabase.instance.client.auth.currentSession;
+    debugPrint('🔍 Existing session: ${session != null ? "YES (user: ${session.user.email})" : "NO"}');
+
+    if (session != null) {
+      await _resolveAuthenticatedStatus();
+    } else {
+      if (mounted) setState(() => _status = _AuthStatus.unauthenticated);
+    }
+  }
+
+  void _subscribeToAuthEvents() {
+    _authSub = Supabase.instance.client.auth.onAuthStateChange.listen(
+      (data) async {
+        final event = data.event;
+        debugPrint('🔔 AUTH EVENT: $event  |  user: ${data.session?.user.email ?? "none"}');
+
+        // Token refreshes never change routing
+        if (event == AuthChangeEvent.tokenRefreshed) return;
+
+        // PASSWORD_RECOVERY fires on mobile (deep link)
+        if (event == AuthChangeEvent.passwordRecovery) {
+          debugPrint('✅ PASSWORD_RECOVERY event — showing ResetPasswordScreen');
+          if (mounted) setState(() => _status = _AuthStatus.passwordRecovery);
+          return;
+        }
+
+        // On web, Supabase fires SIGNED_IN when it exchanges the recovery
+        // token from the URL hash. Re-check the URL to distinguish this
+        // from a normal login SIGNED_IN event.
+        if (event == AuthChangeEvent.signedIn) {
+          debugPrint('🔍 SIGNED_IN event — checking if recovery URL...');
+          if (_isRecoveryUrl()) {
+            debugPrint('✅ Recovery URL confirmed on SIGNED_IN — showing ResetPasswordScreen');
+            if (mounted) setState(() => _status = _AuthStatus.passwordRecovery);
+            return;
+          }
+          debugPrint('ℹ️ Normal SIGNED_IN — resolving authenticated status');
+          await _resolveAuthenticatedStatus();
+          return;
+        }
+
+        if (event == AuthChangeEvent.signedOut) {
+          debugPrint('🔒 SIGNED_OUT — showing unauthenticated');
+          if (mounted) setState(() => _status = _AuthStatus.unauthenticated);
+          return;
+        }
+      },
+      onError: (e) {
+        debugPrint('❌ Auth stream error: $e');
+        if (mounted) setState(() => _status = _AuthStatus.unauthenticated);
+      },
+    );
+  }
+
+  Future<void> _resolveAuthenticatedStatus() async {
+    final myCheckId = ++_checkId;
+    final user = Supabase.instance.client.auth.currentUser;
+    debugPrint('🔍 _resolveAuthenticatedStatus — user: ${user?.email ?? "null"}');
+
+    if (user == null) {
+      if (mounted) setState(() => _status = _AuthStatus.unauthenticated);
+      return;
     }
 
     try {
       final profile = await Supabase.instance.client
           .from('profiles')
           .select('role')
-          .eq('id', session.user.id)
+          .eq('id', user.id)
           .maybeSingle()
           .timeout(const Duration(seconds: 10));
 
-      if (myId != _pendingCheckId || !mounted) return;
+      if (!mounted || myCheckId != _checkId) return;
 
-      final role = (profile?['role'] as String?)?.trim() ?? '';
-      setState(() => _status = role.isEmpty
-          ? _AuthStatus.needsRole
-          : _AuthStatus.authenticated);
+      final role = profile?['role'];
+      debugPrint('🔍 Profile role: $role');
 
-    } on TimeoutException {
-      if (myId == _pendingCheckId && mounted) {
+      if (role == null || (role as String).isEmpty) {
         setState(() => _status = _AuthStatus.needsRole);
+      } else {
+        setState(() => _status = _AuthStatus.authenticated);
       }
-    } catch (_) {
-      if (myId == _pendingCheckId && mounted) {
-        setState(() => _status = _AuthStatus.needsRole);
-      }
+    } catch (e) {
+      debugPrint('❌ Profile fetch error: $e');
+      if (!mounted || myCheckId != _checkId) return;
+      setState(() => _status = _AuthStatus.authenticated);
     }
   }
 
-  Future<void> _signOut() async {
-    await Supabase.instance.client.auth.signOut();
-  }
-
-  Widget _buildForStatus() {
-    switch (_status) {
-      case _AuthStatus.loading:
-        return const _SplashScreen(key: ValueKey('splash'));
-      case _AuthStatus.unauthenticated:
-        return _AuthNavigator(
-          key:      const ValueKey('auth'),
-          onSignIn: () {},
-        );
-      case _AuthStatus.needsRole:
-        return RoleSelectionScreen(
-          key:            const ValueKey('role'),
-          onRoleSelected: () {
-            if (mounted) setState(() => _status = _AuthStatus.authenticated);
-          },
-        );
-      case _AuthStatus.authenticated:
-        return MainShell(
-          key:       const ValueKey('shell'),
-          onSignOut: _signOut,
-        );
-    }
-  }
+  void _handleSignOut()       => setState(() => _status = _AuthStatus.unauthenticated);
+  void _handleRoleSelected()  => setState(() => _status = _AuthStatus.authenticated);
+  void _handleResetComplete() => setState(() => _status = _AuthStatus.unauthenticated);
 
   @override
   Widget build(BuildContext context) {
+    debugPrint('🏗️  AuthGate build — status: $_status');
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 300),
-      child: _buildForStatus(),
+      child: switch (_status) {
+        _AuthStatus.loading =>
+          const _SplashScreen(),
+
+        _AuthStatus.unauthenticated =>
+          const _AuthNavigator(),
+
+        _AuthStatus.needsRole =>
+          RoleSelectionScreen(
+            key:            const ValueKey('roleSelection'),
+            onRoleSelected: _handleRoleSelected,
+          ),
+
+        _AuthStatus.authenticated =>
+          MainShell(
+            key:       const ValueKey('mainShell'),
+            onSignOut: _handleSignOut,
+          ),
+
+        _AuthStatus.passwordRecovery =>
+          ResetPasswordScreen(
+            key:        const ValueKey('resetPassword'),
+            onComplete: _handleResetComplete,
+          ),
+      },
     );
   }
 }
 
-// ── Auth navigator: login ↔ signup ↔ OTP (all inline, no Navigator.push) ──
+// ── Splash ────────────────────────────────────────────────────────────────────
+class _SplashScreen extends StatelessWidget {
+  const _SplashScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Scaffold(
+      backgroundColor: AppColors.background,
+      body: Center(
+        child: CircularProgressIndicator(color: AppColors.primary),
+      ),
+    );
+  }
+}
+
+// ── Auth navigator ────────────────────────────────────────────────────────────
+enum _AuthView { login, signup, signupOtp }
 
 class _AuthNavigator extends StatefulWidget {
-  final VoidCallback onSignIn;
-  const _AuthNavigator({super.key, required this.onSignIn});
+  const _AuthNavigator();
+
   @override
   State<_AuthNavigator> createState() => _AuthNavigatorState();
 }
 
 class _AuthNavigatorState extends State<_AuthNavigator> {
-  // Which screen to show
-  _AuthView _view = _AuthView.login;
+  _AuthView _view       = _AuthView.login;
+  String?   _otpEmail;
+  String?   _otpFullName;
+  String?   _otpStudentId;
 
-  // Signup OTP state — carried here so no Navigator stack exists
-  String _otpEmail    = '';
-  String _otpFullName = '';
+  void _goToLogin()  => setState(() => _view = _AuthView.login);
+  void _goToSignup() => setState(() => _view = _AuthView.signup);
 
-  void _goLogin()  => setState(() => _view = _AuthView.login);
-  void _goSignup() => setState(() => _view = _AuthView.signup);
-
-  void _goSignupOtp({ required String email, required String fullName }) {
+  void _goToSignupOtp({
+    required String email,
+    required String fullName,
+    String? studentId,
+  }) {
     setState(() {
-      _otpEmail    = email;
-      _otpFullName = fullName;
-      _view        = _AuthView.signupOtp;
+      _otpEmail     = email;
+      _otpFullName  = fullName;
+      _otpStudentId = studentId ?? '';
+      _view         = _AuthView.signupOtp;
     });
   }
+
+  void _onSignupVerified() {}
 
   @override
   Widget build(BuildContext context) {
     return AnimatedSwitcher(
-      duration: const Duration(milliseconds: 300),
-      transitionBuilder: (child, animation) => FadeTransition(
-        opacity: animation,
-        child: SlideTransition(
-          position: Tween<Offset>(
-            begin: const Offset(0.05, 0),
-            end:   Offset.zero,
-          ).animate(animation),
-          child: child,
-        ),
-      ),
-      child: _buildView(),
-    );
-  }
+      duration: const Duration(milliseconds: 250),
+      child: switch (_view) {
 
-  Widget _buildView() {
-    switch (_view) {
-      case _AuthView.login:
-        return LoginScreen(
+        _AuthView.login => LoginScreen(
           key:        const ValueKey('login'),
-          onLogin:    widget.onSignIn,
-          onGoSignup: _goSignup,
-        );
+          onLogin:    _onSignupVerified,
+          onGoSignup: _goToSignup,
+        ),
 
-      case _AuthView.signup:
-        return SignupScreen(
+        _AuthView.signup => SignupScreen(
           key:       const ValueKey('signup'),
-          onGoLogin: _goLogin,
-          // SignupScreen calls this when signUp() succeeds,
-          // passing email + fullName so we can show OTP inline.
-          onNeedsOtp: _goSignupOtp,
-        );
+          onGoLogin: _goToLogin,
+          onNeedsOtp: ({
+            required String email,
+            required String fullName,
+            String? studentId,
+          }) => _goToSignupOtp(
+            email:     email,
+            fullName:  fullName,
+            studentId: studentId,
+          ),
+        ),
 
-      case _AuthView.signupOtp:
-        return OtpScreen(
+        _AuthView.signupOtp => OtpScreen(
           key:        const ValueKey('signupOtp'),
-          email:      _otpEmail,
+          email:      _otpEmail!,
           type:       'signup',
           fullName:   _otpFullName,
-          studentId:  '',
-          // onVerified is a no-op — AuthGate drives routing.
-          onVerified: () {},
-          onBack:     _goSignup,
-        );
-    }
-  }
-}
-
-enum _AuthView { login, signup, signupOtp }
-
-// ── Splash ──────────────────────────────────────────────────────────────────
-
-class _SplashScreen extends StatelessWidget {
-  const _SplashScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.primaryDark,
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 80, height: 80,
-              decoration: BoxDecoration(
-                color:        Colors.white.withOpacity(0.15),
-                borderRadius: BorderRadius.circular(24),
-                border: Border.all(
-                    color: Colors.white.withOpacity(0.3), width: 2),
-              ),
-              child: const Icon(Icons.diversity_3_outlined,
-                  color: Colors.white, size: 40),
-            ),
-            const SizedBox(height: 20),
-            const Text('BLOOM',
-                style: TextStyle(
-                    color:         Colors.white,
-                    fontSize:      28,
-                    fontWeight:    FontWeight.w900,
-                    letterSpacing: 2)),
-            const SizedBox(height: 8),
-            Text('GADRC CvSU',
-                style: TextStyle(
-                    color:    Colors.white.withOpacity(0.6),
-                    fontSize: 14)),
-            const SizedBox(height: 40),
-            const CircularProgressIndicator(
-                color: Colors.white, strokeWidth: 2),
-          ],
+          studentId:  _otpStudentId,
+          onVerified: _onSignupVerified,
+          onBack:     _goToSignup,
         ),
-      ),
+      },
     );
   }
 }

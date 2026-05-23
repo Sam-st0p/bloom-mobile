@@ -32,7 +32,6 @@ class _LoginScreenState extends State<LoginScreen> {
   bool    _showOtp       = false;
   String  _email         = '';
 
-  // ── Cooldown timer ─────────────────────────────────────────────
   int  _cooldownSeconds = 0;
   bool _isCoolingDown   = false;
 
@@ -43,7 +42,6 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
-  // ── Cooldown countdown ─────────────────────────────────────────
   void _startCooldownTimer(int seconds) {
     setState(() { _cooldownSeconds = seconds; _isCoolingDown = true; });
     Future.doWhile(() async {
@@ -58,7 +56,6 @@ class _LoginScreenState extends State<LoginScreen> {
     });
   }
 
-  // ── Login handler ──────────────────────────────────────────────
   Future<void> _handleLogin() async {
     setState(() => _error = null);
 
@@ -84,7 +81,6 @@ class _LoginScreenState extends State<LoginScreen> {
     if (!mounted) return;
 
     if (error != null) {
-      // Invalid credentials — record failure, show error, no OTP
       final justLocked = RateLimiter.recordFailure(
           'login', maxAttempts: 6, cooldownSecs: 30);
       if (justLocked) {
@@ -98,14 +94,13 @@ class _LoginScreenState extends State<LoginScreen> {
         final remaining = 6 - used;
         final message   = _friendlyAuthError(error);
         setState(() {
-          _error   = remaining > 0
+          _error = remaining > 0
               ? '$message ($remaining attempt${remaining == 1 ? '' : 's'} remaining)'
               : message;
           _loading = false;
         });
       }
     } else {
-      // Valid credentials — OTP sent, show OTP screen
       RateLimiter.reset('login');
       setState(() {
         _loading = false;
@@ -115,7 +110,6 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  // ── Google Sign-In handler ─────────────────────────────────────
   Future<void> _handleGoogleSignIn() async {
     setState(() { _loading = true; _error = null; });
     try {
@@ -131,11 +125,16 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  // ── Forgot password handler ────────────────────────────────────
+  // ── Forgot password ──────────────────────────────────────────────────────
+  // We do NOT pass redirectTo at all. Supabase will use the Site URL
+  // configured in the dashboard (Authentication → URL Configuration).
+  // Set your Site URL there to wherever your app runs, e.g. http://localhost:8080
+  // and always run with: flutter run -d chrome --web-port=8080
   Future<void> _handleForgotPassword() async {
     final email = _emailController.text.trim();
     if (email.isEmpty) {
-      setState(() => _error = 'Enter your email above, then tap Forgot Password.');
+      setState(() =>
+          _error = 'Enter your email above, then tap Forgot Password.');
       return;
     }
     final emailError = AppValidators.email(email);
@@ -150,10 +149,14 @@ class _LoginScreenState extends State<LoginScreen> {
 
     setState(() { _loading = true; _error = null; });
     try {
+      // ✅ No redirectTo parameter at all — Supabase uses the Site URL
+      // from the dashboard. This avoids the 401 caused by dynamic ports.
       await Supabase.instance.client.auth.resetPasswordForEmail(
-        AppValidators.sanitize(email).toLowerCase());
+        AppValidators.sanitize(email).toLowerCase(),
+      );
       if (mounted) _showResetSentDialog(email);
     } catch (_) {
+      // Always show success dialog — never reveal if an account exists
       if (mounted) _showResetSentDialog(email);
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -196,7 +199,8 @@ class _LoginScreenState extends State<LoginScreen> {
                   borderRadius: BorderRadius.circular(12))),
             child: Text('Got it',
                 style: GoogleFonts.nunito(
-                    color: Colors.white, fontWeight: FontWeight.w800))),
+                    color: Colors.white,
+                    fontWeight: FontWeight.w800))),
         ],
       ),
     );
@@ -230,7 +234,7 @@ class _LoginScreenState extends State<LoginScreen> {
       backgroundColor: AppColors.background,
       body: Column(
         children: [
-          // ── Oval gradient header ───────────────────────────────
+          // ── Oval gradient header ───────────────────────────────────
           Container(
             width: double.infinity,
             decoration: const BoxDecoration(
@@ -254,27 +258,26 @@ class _LoginScreenState extends State<LoginScreen> {
                   border: Border.all(
                       color: Colors.white.withOpacity(0.3), width: 1.5)),
                 child: const Center(
-                  child: Icon(
-                    Icons.diversity_3_rounded,
-                    color: Colors.white,
-                    size: 38,
-                  ),
-                ),
+                  child: Icon(Icons.diversity_3_rounded,
+                      color: Colors.white, size: 38)),
               ),
               const SizedBox(height: 16),
               Text('GADRC CvSU',
                   style: GoogleFonts.nunito(
-                      color: Colors.white, fontSize: 26,
-                      fontWeight: FontWeight.w900, letterSpacing: -0.5)),
+                      color: Colors.white,
+                      fontSize: 26,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: -0.5)),
               const SizedBox(height: 6),
               Text('Gender & Development Resource Center',
                   style: GoogleFonts.nunito(
-                      color: Colors.white.withOpacity(0.75), fontSize: 13)),
+                      color: Colors.white.withOpacity(0.75),
+                      fontSize: 13)),
               const SizedBox(height: 8),
             ]),
           ),
 
-          // ── Form area ──────────────────────────────────────────
+          // ── Form area ──────────────────────────────────────────────
           Expanded(
             child: SingleChildScrollView(
               padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
@@ -283,7 +286,8 @@ class _LoginScreenState extends State<LoginScreen> {
                 children: [
                   Text('Welcome back!',
                       style: GoogleFonts.nunito(
-                          fontSize: 22, fontWeight: FontWeight.w900,
+                          fontSize: 22,
+                          fontWeight: FontWeight.w900,
                           color: AppColors.textDark)),
                   const SizedBox(height: 6),
                   Text('Sign in to continue your GAD journey',
@@ -291,7 +295,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           fontSize: 13, color: AppColors.textLight)),
                   const SizedBox(height: 28),
 
-                  // ── Error / cooldown banner ────────────────────
+                  // ── Error / cooldown banner ──────────────────────
                   if (_error != null) ...[
                     Container(
                       padding: const EdgeInsets.all(12),
@@ -305,45 +309,48 @@ class _LoginScreenState extends State<LoginScreen> {
                             _isCoolingDown
                                 ? Icons.timer_outlined
                                 : Icons.error_outline,
-                            color: AppColors.danger, size: 18),
+                            color: AppColors.danger,
+                            size: 18),
                         const SizedBox(width: 8),
-                        Expanded(child: Text(
-                          _isCoolingDown
-                              ? 'Too many attempts. Try again in $_cooldownSeconds seconds.'
-                              : _error!,
-                          style: GoogleFonts.nunito(
-                              color: AppColors.danger, fontSize: 13))),
+                        Expanded(
+                          child: Text(
+                            _isCoolingDown
+                                ? 'Too many attempts. Try again in $_cooldownSeconds seconds.'
+                                : _error!,
+                            style: GoogleFonts.nunito(
+                                color: AppColors.danger, fontSize: 13)),
+                        ),
                       ]),
                     ),
                     const SizedBox(height: 16),
                   ],
 
-                  // ── Email ──────────────────────────────────────
+                  // ── Email ──────────────────────────────────────────
                   _buildLabel('STUDENT EMAIL'),
                   const SizedBox(height: 8),
                   TextField(
-                    controller: _emailController,
+                    controller:   _emailController,
                     keyboardType: TextInputType.emailAddress,
                     style: GoogleFonts.nunito(
                         fontSize: 14, color: AppColors.textDark),
                     decoration: InputDecoration(
-                      hintText: 'you@cvsu.edu.ph',
+                      hintText:  'you@cvsu.edu.ph',
                       hintStyle: GoogleFonts.nunito(
                           color: AppColors.textLight),
                       prefixIcon: const Icon(Icons.mail_outline,
                           color: AppColors.textLight, size: 20))),
                   const SizedBox(height: 16),
 
-                  // ── Password ───────────────────────────────────
+                  // ── Password ───────────────────────────────────────
                   _buildLabel('PASSWORD'),
                   const SizedBox(height: 8),
                   TextField(
-                    controller: _passController,
+                    controller:  _passController,
                     obscureText: _obscurePass,
                     style: GoogleFonts.nunito(
                         fontSize: 14, color: AppColors.textDark),
                     decoration: InputDecoration(
-                      hintText: '••••••••',
+                      hintText:  '••••••••',
                       hintStyle: GoogleFonts.nunito(
                           color: AppColors.textLight),
                       prefixIcon: const Icon(Icons.lock_outline,
@@ -354,15 +361,16 @@ class _LoginScreenState extends State<LoginScreen> {
                                 ? Icons.visibility_off_outlined
                                 : Icons.visibility_outlined,
                             color: AppColors.textLight, size: 20),
-                        onPressed: () =>
-                            setState(() => _obscurePass = !_obscurePass)))),
+                        onPressed: () => setState(
+                            () => _obscurePass = !_obscurePass)))),
                   const SizedBox(height: 10),
 
-                  // ── Forgot password ────────────────────────────
+                  // ── Forgot password ────────────────────────────────
                   Align(
                     alignment: Alignment.centerRight,
                     child: TextButton(
-                      onPressed: _loading ? null : _handleForgotPassword,
+                      onPressed:
+                          _loading ? null : _handleForgotPassword,
                       child: Text('Forgot password?',
                           style: GoogleFonts.nunito(
                               color: AppColors.primary,
@@ -371,12 +379,13 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 8),
 
-                  // ── Sign In button ─────────────────────────────
+                  // ── Sign In button ─────────────────────────────────
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
                       onPressed: (_loading || _isCoolingDown)
-                          ? null : _handleLogin,
+                          ? null
+                          : _handleLogin,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppColors.primary,
                         foregroundColor: Colors.white,
@@ -384,13 +393,18 @@ class _LoginScreenState extends State<LoginScreen> {
                             AppColors.primary.withOpacity(0.5),
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(16)),
-                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        padding:
+                            const EdgeInsets.symmetric(vertical: 16),
                         elevation: 4,
-                        shadowColor: AppColors.primary.withOpacity(0.4)),
+                        shadowColor:
+                            AppColors.primary.withOpacity(0.4)),
                       child: _loading
-                          ? const SizedBox(height: 20, width: 20,
+                          ? const SizedBox(
+                              height: 20,
+                              width: 20,
                               child: CircularProgressIndicator(
-                                  color: Colors.white, strokeWidth: 2.5))
+                                  color: Colors.white,
+                                  strokeWidth: 2.5))
                           : _isCoolingDown
                               ? Text('Wait $_cooldownSeconds s...',
                                   style: GoogleFonts.nunito(
@@ -404,31 +418,36 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 24),
 
-                  // ── OR divider ─────────────────────────────────
+                  // ── OR divider ─────────────────────────────────────
                   Row(children: [
                     const Expanded(child: Divider()),
                     Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 12),
                       child: Text('or',
                           style: GoogleFonts.nunito(
-                              color: AppColors.textLight, fontSize: 13)),
+                              color: AppColors.textLight,
+                              fontSize: 13)),
                     ),
                     const Expanded(child: Divider()),
                   ]),
                   const SizedBox(height: 16),
 
-                  // ── Google Sign-In button ──────────────────────
+                  // ── Google Sign-In button ──────────────────────────
                   SizedBox(
                     width: double.infinity,
                     child: OutlinedButton(
-                      onPressed: _loading ? null : _handleGoogleSignIn,
+                      onPressed:
+                          _loading ? null : _handleGoogleSignIn,
                       style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        padding:
+                            const EdgeInsets.symmetric(vertical: 14),
                         side: BorderSide(
-                            color: AppColors.textLight.withOpacity(0.4)),
+                            color: AppColors.textLight
+                                .withOpacity(0.4)),
                         shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16)),
-                      ),
+                            borderRadius:
+                                BorderRadius.circular(16))),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         mainAxisSize: MainAxisSize.min,
@@ -439,15 +458,13 @@ class _LoginScreenState extends State<LoginScreen> {
                               color: Colors.white,
                               borderRadius: BorderRadius.circular(4),
                               border: Border.all(
-                                  color: Colors.grey.shade300),
-                            ),
+                                  color: Colors.grey.shade300)),
                             child: const Center(
                               child: Text('G',
                                   style: TextStyle(
                                       fontSize: 13,
                                       fontWeight: FontWeight.w700,
-                                      color: Color(0xFF4285F4))),
-                            ),
+                                      color: Color(0xFF4285F4)))),
                           ),
                           const SizedBox(width: 10),
                           Text('Continue with Google',
@@ -461,17 +478,20 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 24),
 
-                  // ── Sign up link ───────────────────────────────
+                  // ── Sign up link ───────────────────────────────────
                   Center(
                     child: GestureDetector(
                       onTap: widget.onGoSignup,
                       child: RichText(
                         text: TextSpan(
                           style: GoogleFonts.nunito(
-                              color: AppColors.textLight, fontSize: 13),
+                              color: AppColors.textLight,
+                              fontSize: 13),
                           children: [
-                            const TextSpan(text: "Don't have an account? "),
-                            TextSpan(text: 'Sign Up',
+                            const TextSpan(
+                                text: "Don't have an account? "),
+                            TextSpan(
+                                text: 'Sign Up',
                                 style: GoogleFonts.nunito(
                                     color: AppColors.primary,
                                     fontWeight: FontWeight.w800)),
@@ -490,7 +510,9 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget _buildLabel(String text) {
     return Text(text,
         style: GoogleFonts.nunito(
-            fontSize: 12, fontWeight: FontWeight.w700,
-            color: AppColors.textMid, letterSpacing: 0.5));
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+            color: AppColors.textMid,
+            letterSpacing: 0.5));
   }
 }

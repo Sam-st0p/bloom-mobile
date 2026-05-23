@@ -3,17 +3,13 @@
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import '../theme/app_theme.dart';
 import '../utils/validators.dart';
 import '../services/auth_service.dart';
 
 class SignupScreen extends StatefulWidget {
   final VoidCallback onGoLogin;
-  // Called when signUp() succeeds — passes email + fullName to parent
-  // so it can show OtpScreen inline without a Navigator push.
-  final void Function({required String email, required String fullName})
-      onNeedsOtp;
+  final void Function({required String email, required String fullName}) onNeedsOtp;
 
   const SignupScreen({
     super.key,
@@ -26,7 +22,7 @@ class SignupScreen extends StatefulWidget {
 }
 
 class _SignupScreenState extends State<SignupScreen> {
-  final _formKey      = GlobalKey<FormState>();
+  final _formKey       = GlobalKey<FormState>();
   final _firstNameCtrl = TextEditingController();
   final _lastNameCtrl  = TextEditingController();
   final _emailCtrl     = TextEditingController();
@@ -49,53 +45,43 @@ class _SignupScreenState extends State<SignupScreen> {
   }
 
   Future<void> _handleSignup() async {
+    if (_loading) return;
+    setState(() => _error = null);
+
     if (!_formKey.currentState!.validate()) return;
-    setState(() { _loading = true; _error = null; });
 
-    final fullName =
-        '${_firstNameCtrl.text.trim()} ${_lastNameCtrl.text.trim()}';
+    setState(() => _loading = true);
 
-    try {
-      final error = await AuthService.signUp(
-        email:     _emailCtrl.text.trim(),
-        password:  _passCtrl.text,
-        fullName:  fullName,
-        studentId: '',
-      );
+    final fullName   = '${_firstNameCtrl.text.trim()} ${_lastNameCtrl.text.trim()}';
+    final cleanEmail = AppValidators.normalizeEmail(_emailCtrl.text);
 
-      if (!mounted) return;
+    final error = await AuthService.signUp(
+      email:     cleanEmail,
+      password:  _passCtrl.text,
+      fullName:  fullName,
+      studentId: '',
+    );
 
-      if (error != null) {
-        setState(() { _error = error; _loading = false; });
-        return;
-      }
+    if (!mounted) return;
 
-      // signUp() succeeded — OTP sent.
-      // Tell parent to show OtpScreen inline (no Navigator.push).
-      widget.onNeedsOtp(
-        email:    _emailCtrl.text.trim(),
-        fullName: fullName,
-      );
-
-    } on AuthException catch (e) {
-      if (mounted) setState(() { _error = e.message; _loading = false; });
-    } catch (e) {
-      if (mounted) setState(() {
-        _error   = 'Signup failed. Please try again.';
-        _loading = false;
-      });
+    if (error != null) {
+      setState(() { _error = error; _loading = false; });
+      return;
     }
+
+    // Success — tell parent to show OTP inline
+    widget.onNeedsOtp(email: cleanEmail, fullName: fullName);
   }
 
   Future<void> _handleGoogleSignup() async {
+    if (_loading) return;
     setState(() { _loading = true; _error = null; });
     try {
-      await AuthService.signInWithGoogle();
-    } on AuthException catch (e) {
-      if (mounted) setState(() => _error = e.message);
-    } catch (e) {
-      if (mounted) setState(() =>
-          _error = 'Google sign-in failed. Please try again.');
+      final error = await AuthService.signInWithGoogle();
+      if (!mounted) return;
+      if (error != null && error != 'Google sign-in cancelled.') {
+        setState(() => _error = error);
+      }
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -105,290 +91,353 @@ class _SignupScreenState extends State<SignupScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
-          child: Form(
-            key: _formKey,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Back button
-                GestureDetector(
-                  onTap: widget.onGoLogin,
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.arrow_back_ios_new_rounded,
-                          size: 16, color: AppColors.primaryDark),
-                      const SizedBox(width: 6),
-                      Text('Back to Login',
-                          style: GoogleFonts.poppins(
-                              fontSize: 13,
-                              color: AppColors.primaryDark,
-                              fontWeight: FontWeight.w500)),
-                    ],
-                  ),
-                ),
+      body: Column(children: [
 
-                const SizedBox(height: 28),
+        // ── Header ────────────────────────────────────────────────────
+        Container(
+          width: double.infinity,
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [AppColors.primaryDark, AppColors.primary],
+            ),
+            borderRadius: BorderRadius.only(
+              bottomLeft:  Radius.elliptical(220, 80),
+              bottomRight: Radius.elliptical(220, 80),
+            ),
+          ),
+          padding: const EdgeInsets.fromLTRB(32, 64, 32, 48),
+          child: Column(children: [
+            Align(
+              alignment: Alignment.centerLeft,
+              child: GestureDetector(
+                onTap: widget.onGoLogin,
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(12)),
+                  padding: const EdgeInsets.all(10),
+                  child: const Icon(Icons.chevron_left, color: Colors.white, size: 22)),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              width: 76, height: 76,
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: Colors.white.withOpacity(0.3), width: 1.5)),
+              child: const Center(
+                child: Icon(Icons.diversity_3_rounded, color: Colors.white, size: 36)),
+            ),
+            const SizedBox(height: 16),
+            Text('Create Account',
+                style: GoogleFonts.nunito(
+                    color: Colors.white, fontSize: 22, fontWeight: FontWeight.w900)),
+            const SizedBox(height: 6),
+            Text('Join the GADRC CvSU community',
+                style: GoogleFonts.nunito(
+                    color: Colors.white.withOpacity(0.75), fontSize: 13)),
+          ]),
+        ),
 
-                Text('Create Account',
-                    style: GoogleFonts.poppins(
-                        fontSize: 28,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.textDark)),
-                const SizedBox(height: 6),
-                Text('Join BLOOM — GADRC CvSU',
-                    style: GoogleFonts.poppins(
-                        fontSize: 14, color: AppColors.textLight)),
+        // ── Form ──────────────────────────────────────────────────────
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
+            child: Form(
+              key: _formKey,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
 
-                const SizedBox(height: 32),
-
-                // Error banner
-                if (_error != null) ...[
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: AppColors.danger.withOpacity(0.08),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(
-                          color: AppColors.danger.withOpacity(0.4)),
+                  // ── Google button ───────────────────────────────────
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton(
+                      onPressed: _loading ? null : _handleGoogleSignup,
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        side: BorderSide(color: AppColors.textLight.withOpacity(0.4)),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16))),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 20, height: 20,
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(4),
+                              border: Border.all(color: Colors.grey.shade300)),
+                            child: const Center(
+                              child: Text('G',
+                                  style: TextStyle(fontSize: 13,
+                                      fontWeight: FontWeight.w700,
+                                      color: Color(0xFF4285F4)))),
+                          ),
+                          const SizedBox(width: 10),
+                          Text('Continue with Google',
+                              style: GoogleFonts.nunito(
+                                  fontSize: 15, fontWeight: FontWeight.w700,
+                                  color: AppColors.textDark)),
+                        ],
+                      ),
                     ),
-                    child: Row(children: [
-                      const Icon(Icons.error_outline,
-                          color: AppColors.danger, size: 18),
-                      const SizedBox(width: 10),
-                      Expanded(child: Text(_error!,
-                          style: GoogleFonts.poppins(
-                              fontSize: 13, color: AppColors.danger))),
-                    ]),
                   ),
                   const SizedBox(height: 20),
-                ],
 
-                // First + Last name row
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(child: _buildField(
-                      controller: _firstNameCtrl,
-                      label: 'First Name',
-                      icon: Icons.person_outline_rounded,
-                      validator: (v) =>
-                          (v == null || v.trim().isEmpty) ? 'Required' : null,
-                    )),
-                    const SizedBox(width: 12),
-                    Expanded(child: _buildField(
-                      controller: _lastNameCtrl,
-                      label: 'Last Name',
-                      icon: Icons.person_outline_rounded,
-                      validator: (v) =>
-                          (v == null || v.trim().isEmpty) ? 'Required' : null,
-                    )),
+                  // ── Divider ─────────────────────────────────────────
+                  Row(children: [
+                    const Expanded(child: Divider()),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      child: Text('or sign up with email',
+                          style: GoogleFonts.nunito(
+                              color: AppColors.textLight, fontSize: 13))),
+                    const Expanded(child: Divider()),
+                  ]),
+                  const SizedBox(height: 20),
+
+                  // ── Error banner ────────────────────────────────────
+                  if (_error != null) ...[
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: AppColors.danger.withOpacity(0.08),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: AppColors.danger.withOpacity(0.3))),
+                      child: Row(children: [
+                        const Icon(Icons.error_outline, color: AppColors.danger, size: 18),
+                        const SizedBox(width: 8),
+                        Expanded(child: Text(_error!,
+                            style: GoogleFonts.nunito(color: AppColors.danger, fontSize: 13))),
+                      ]),
+                    ),
+                    const SizedBox(height: 16),
                   ],
-                ),
-                const SizedBox(height: 16),
 
-                _buildField(
-                  controller: _emailCtrl,
-                  label: 'Email Address',
-                  icon: Icons.email_outlined,
-                  keyboardType: TextInputType.emailAddress,
-                  validator: AppValidators.email,
-                ),
-                const SizedBox(height: 16),
-
-                _buildField(
-                  controller: _passCtrl,
-                  label: 'Password',
-                  icon: Icons.lock_outline_rounded,
-                  obscure: _obscurePass,
-                  suffixIcon: IconButton(
-                    icon: Icon(
-                      _obscurePass
-                          ? Icons.visibility_outlined
-                          : Icons.visibility_off_outlined,
-                      color: AppColors.textLight, size: 20),
-                    onPressed: () =>
-                        setState(() => _obscurePass = !_obscurePass),
+                  // ── Name row ────────────────────────────────────────
+                  _buildLabel('FULL NAME'),
+                  const SizedBox(height: 8),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(child: _buildFormField(
+                        ctrl:      _firstNameCtrl,
+                        hint:      'First name',
+                        icon:      Icons.person_outline,
+                        validator: (v) => AppValidators.name(v, field: 'First name'),
+                      )),
+                      const SizedBox(width: 10),
+                      Expanded(child: _buildFormField(
+                        ctrl:      _lastNameCtrl,
+                        hint:      'Last name',
+                        icon:      Icons.person_outline,
+                        validator: (v) => AppValidators.name(v, field: 'Last name'),
+                      )),
+                    ],
                   ),
-                  validator: AppValidators.password,
-                ),
-                const SizedBox(height: 16),
+                  const SizedBox(height: 16),
 
-                _buildField(
-                  controller: _confirmCtrl,
-                  label: 'Confirm Password',
-                  icon: Icons.lock_outline_rounded,
-                  obscure: _obscureConfirm,
-                  suffixIcon: IconButton(
-                    icon: Icon(
-                      _obscureConfirm
-                          ? Icons.visibility_outlined
-                          : Icons.visibility_off_outlined,
-                      color: AppColors.textLight, size: 20),
-                    onPressed: () =>
-                        setState(() => _obscureConfirm = !_obscureConfirm),
+                  // ── Email ───────────────────────────────────────────
+                  _buildLabel('EMAIL ADDRESS'),
+                  const SizedBox(height: 8),
+                  _buildFormField(
+                    ctrl:        _emailCtrl,
+                    hint:        'your@email.com',
+                    icon:        Icons.mail_outline,
+                    inputType:   TextInputType.emailAddress,
+                    validator:   AppValidators.email,
                   ),
-                  validator: (v) {
-                    if (v == null || v.isEmpty) {
-                      return 'Please confirm your password.';
-                    }
-                    if (v != _passCtrl.text) return 'Passwords do not match.';
-                    return null;
-                  },
-                ),
+                  const SizedBox(height: 16),
 
-                const SizedBox(height: 28),
-
-                SizedBox(
-                  width: double.infinity,
-                  height: 54,
-                  child: ElevatedButton(
-                    onPressed: _loading ? null : _handleSignup,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.primaryDark,
-                      disabledBackgroundColor:
-                          AppColors.primaryDark.withOpacity(0.4),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14)),
-                      elevation: 0,
-                    ),
-                    child: _loading
-                        ? const SizedBox(
-                            width: 22, height: 22,
-                            child: CircularProgressIndicator(
-                                color: Colors.white, strokeWidth: 2))
-                        : Text('Create Account',
-                            style: GoogleFonts.poppins(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.white)),
+                  // ── Password ────────────────────────────────────────
+                  _buildLabel('PASSWORD'),
+                  const SizedBox(height: 8),
+                  _buildFormField(
+                    ctrl:      _passCtrl,
+                    hint:      'Min. 8 chars, uppercase, number, symbol',
+                    icon:      Icons.lock_outline,
+                    obscure:   _obscurePass,
+                    validator: AppValidators.password,
+                    onChanged: (_) => setState(() {}),
+                    suffix: IconButton(
+                      icon: Icon(
+                          _obscurePass
+                              ? Icons.visibility_off_outlined
+                              : Icons.visibility_outlined,
+                          color: AppColors.textLight, size: 20),
+                      onPressed: () => setState(() => _obscurePass = !_obscurePass)),
                   ),
-                ),
+                  _buildStrengthBar(_passCtrl.text),
+                  const SizedBox(height: 16),
 
-                const SizedBox(height: 20),
-
-                Row(children: [
-                  const Expanded(child: Divider()),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: Text('or',
-                        style: GoogleFonts.poppins(
-                            fontSize: 13, color: AppColors.textLight)),
+                  // ── Confirm Password ────────────────────────────────
+                  _buildLabel('CONFIRM PASSWORD'),
+                  const SizedBox(height: 8),
+                  _buildFormField(
+                    ctrl:      _confirmCtrl,
+                    hint:      'Re-enter password',
+                    icon:      Icons.lock_outline,
+                    obscure:   _obscureConfirm,
+                    validator: (v) => AppValidators.confirmPassword(v, _passCtrl.text),
+                    suffix: IconButton(
+                      icon: Icon(
+                          _obscureConfirm
+                              ? Icons.visibility_off_outlined
+                              : Icons.visibility_outlined,
+                          color: AppColors.textLight, size: 20),
+                      onPressed: () => setState(() => _obscureConfirm = !_obscureConfirm)),
                   ),
-                  const Expanded(child: Divider()),
-                ]),
-                const SizedBox(height: 16),
+                  const SizedBox(height: 20),
 
-                SizedBox(
-                  width: double.infinity,
-                  height: 54,
-                  child: OutlinedButton.icon(
-                    onPressed: _loading ? null : _handleGoogleSignup,
-                    icon: Image.asset(
-                      'assets/images/google_logo.png',
-                      width: 20, height: 20,
-                      errorBuilder: (_, __, ___) => const Icon(
-                          Icons.g_mobiledata_rounded,
-                          size: 22, color: AppColors.textMid),
-                    ),
-                    label: Text('Continue with Google',
-                        style: GoogleFonts.poppins(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w500,
-                            color: AppColors.textDark)),
-                    style: OutlinedButton.styleFrom(
-                      side: const BorderSide(color: AppColors.border),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14)),
-                    ),
+                  // ── Info note ───────────────────────────────────────
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: AppColors.primary.withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(12)),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(Icons.info_outline_rounded,
+                            color: AppColors.primary, size: 18),
+                        const SizedBox(width: 10),
+                        Expanded(child: Text(
+                          'A 6-digit verification code will be sent to your email. After verifying, you\'ll choose your role.',
+                          style: GoogleFonts.nunito(
+                              fontSize: 12, color: AppColors.textMid, height: 1.5))),
+                      ]),
                   ),
-                ),
+                  const SizedBox(height: 20),
 
-                const SizedBox(height: 28),
-
-                Center(
-                  child: GestureDetector(
-                    onTap: widget.onGoLogin,
-                    child: RichText(
-                      text: TextSpan(
-                        text: 'Already have an account? ',
-                        style: GoogleFonts.poppins(
-                            fontSize: 13, color: AppColors.textLight),
-                        children: [
-                          TextSpan(
-                            text: 'Log In',
-                            style: GoogleFonts.poppins(
-                                fontSize: 13,
-                                color: AppColors.primaryDark,
-                                fontWeight: FontWeight.w600)),
-                        ]),
+                  // ── Create Account button ───────────────────────────
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: _loading ? null : _handleSignup,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primary,
+                        foregroundColor: Colors.white,
+                        disabledBackgroundColor: AppColors.primary.withOpacity(0.4),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16)),
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        elevation: 4,
+                        shadowColor: AppColors.primary.withOpacity(0.4)),
+                      child: _loading
+                          ? const SizedBox(height: 20, width: 20,
+                              child: CircularProgressIndicator(
+                                  color: Colors.white, strokeWidth: 2.5))
+                          : Text('Create Account',
+                              style: GoogleFonts.nunito(
+                                  fontSize: 16, fontWeight: FontWeight.w800)),
                     ),
                   ),
-                ),
-                const SizedBox(height: 24),
-              ],
+                  const SizedBox(height: 16),
+
+                  // ── Sign in link ────────────────────────────────────
+                  Center(
+                    child: GestureDetector(
+                      onTap: widget.onGoLogin,
+                      child: RichText(
+                        text: TextSpan(
+                          style: GoogleFonts.nunito(
+                              color: AppColors.textLight, fontSize: 13),
+                          children: [
+                            const TextSpan(text: 'Already have an account? '),
+                            TextSpan(text: 'Sign In',
+                                style: GoogleFonts.nunito(
+                                    color: AppColors.primary,
+                                    fontWeight: FontWeight.w800)),
+                          ]),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
+      ]),
+    );
+  }
+
+  Widget _buildStrengthBar(String password) {
+    if (password.isEmpty) return const SizedBox(height: 6);
+    final score  = AppValidators.passwordStrength(password);
+    final colors = [
+      Colors.transparent, Colors.red, Colors.red,
+      Colors.orange, Colors.lightGreen, Colors.green,
+    ];
+    final labels = ['', 'Very Weak', 'Weak', 'Fair', 'Good', 'Strong'];
+    final color  = score < colors.length ? colors[score] : Colors.green;
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const SizedBox(height: 8),
+      Row(children: List.generate(5, (i) => Expanded(child: Container(
+          height: 4,
+          margin: EdgeInsets.only(right: i < 4 ? 4 : 0),
+          decoration: BoxDecoration(
+            color: i < score ? color : AppColors.border,
+            borderRadius: BorderRadius.circular(2)))))),
+      const SizedBox(height: 4),
+      Text(score > 0 ? labels[score] : '',
+          style: GoogleFonts.nunito(
+              fontSize: 11, color: color, fontWeight: FontWeight.w700)),
+    ]);
+  }
+
+  Widget _buildFormField({
+    required TextEditingController ctrl,
+    required String hint,
+    required IconData icon,
+    String? Function(String?)? validator,
+    bool obscure = false,
+    Widget? suffix,
+    TextInputType? inputType,
+    void Function(String)? onChanged,
+  }) {
+    return TextFormField(
+      controller:   ctrl,
+      obscureText:  obscure,
+      keyboardType: inputType,
+      validator:    validator,
+      onChanged:    onChanged,
+      style: GoogleFonts.nunito(fontSize: 14, color: AppColors.textDark),
+      autovalidateMode: AutovalidateMode.onUserInteraction,
+      decoration: InputDecoration(
+        hintText:    hint,
+        hintStyle:   GoogleFonts.nunito(color: AppColors.textLight, fontSize: 13),
+        prefixIcon:  Icon(icon, color: AppColors.textLight, size: 20),
+        suffixIcon:  suffix,
+        filled:      true,
+        fillColor:   Colors.white,
+        border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: AppColors.border)),
+        enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: AppColors.border)),
+        focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: AppColors.primary, width: 2)),
+        errorBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: AppColors.danger)),
+        focusedErrorBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: AppColors.danger, width: 2)),
       ),
     );
   }
 
-  Widget _buildField({
-    required TextEditingController controller,
-    required String label,
-    required IconData icon,
-    String? Function(String?)? validator,
-    bool obscure = false,
-    Widget? suffixIcon,
-    TextInputType keyboardType = TextInputType.text,
-  }) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label,
-            style: GoogleFonts.poppins(
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
-                color: AppColors.textDark)),
-        const SizedBox(height: 6),
-        TextFormField(
-          controller:  controller,
-          obscureText: obscure,
-          keyboardType: keyboardType,
-          validator:   validator,
-          style: GoogleFonts.poppins(
-              fontSize: 14, color: AppColors.textDark),
-          decoration: InputDecoration(
-            prefixIcon: Icon(icon, color: AppColors.textLight, size: 20),
-            suffixIcon: suffixIcon,
-            filled:     true,
-            fillColor:  Colors.white,
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-            border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(color: AppColors.border)),
-            enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(color: AppColors.border)),
-            focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(
-                    color: AppColors.primaryDark, width: 1.5)),
-            errorBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(color: AppColors.danger)),
-            focusedErrorBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(
-                    color: AppColors.danger, width: 1.5)),
-          ),
-        ),
-      ],
-    );
+  Widget _buildLabel(String text) {
+    return Text(text,
+        style: GoogleFonts.nunito(
+            fontSize: 12, fontWeight: FontWeight.w700,
+            color: AppColors.textMid, letterSpacing: 0.5));
   }
 }
