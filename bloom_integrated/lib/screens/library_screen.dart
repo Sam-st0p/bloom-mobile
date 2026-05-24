@@ -72,7 +72,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
   _LibraryFilters _filters = const _LibraryFilters();
 
   ModuleModel? _selectedModule;
-  Map<String, dynamic>? _selectedRaw; // stores raw map with metadata
+  Map<String, dynamic>? _selectedRaw;
   List<Map<String, dynamic>> _moduleFiles = [];
   bool _loadingFiles = false;
 
@@ -209,7 +209,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
   Future<void> _openFile(Map<String, dynamic> file) async {
     final url = file['file_url']?.toString();
     if (url == null || url.isEmpty) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('File URL not available.')));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('File URL not available.')));
       return;
     }
 
@@ -217,7 +218,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       activityType:  'file_opened',
       referenceId:   file['id']?.toString(),
       referenceType: 'module_file',
-      metadata: { 'file_name': file['file_name'], 'module_id': file['module_id'] },
+      metadata: {'file_name': file['file_name'], 'module_id': file['module_id']},
     );
 
     if (_selectedModule != null) {
@@ -229,7 +230,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
     }
 
     if (!mounted) return;
-    Navigator.push(context, MaterialPageRoute(builder: (_) => PdfViewerScreen(url: url, title: file['file_name'] ?? 'Document')));
+    Navigator.push(context, MaterialPageRoute(
+        builder: (_) => PdfViewerScreen(
+            url: url, title: file['file_name'] ?? 'Document')));
   }
 
   Future<void> _updateProgress(String moduleId, int pct) async {
@@ -237,9 +240,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
     if (userId == null) return;
     try {
       await _supabase.from('module_progress').upsert({
-        'user_id': userId, 'module_id': moduleId,
+        'user_id':          userId,
+        'module_id':        moduleId,
         'progress_percent': pct,
-        'status': pct == 100 ? 'completed' : 'in_progress',
+        'status':           pct == 100 ? 'completed' : 'in_progress',
         'last_accessed_at': DateTime.now().toIso8601String(),
       }, onConflict: 'user_id,module_id');
       await _load();
@@ -248,7 +252,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   List<ModuleModel> get _filtered {
     return _modules.where((m) {
-      // Search — checks title, category, author, and tags
       if (_search.isNotEmpty) {
         final q = _search.toLowerCase();
         final matchTitle    = m.title.toLowerCase().contains(q);
@@ -257,18 +260,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
         final matchTags     = (m.tags ?? []).any((t) => t.toLowerCase().contains(q));
         if (!matchTitle && !matchCategory && !matchAuthor && !matchTags) return false;
       }
-      // Category filter
       if (_filters.categoryName != null && m.category != _filters.categoryName) return false;
-      // Author filter
       if (_filters.author != null && (m.author ?? '') != _filters.author) return false;
-      // Date range filter
       if (_filters.dateFrom != null && m.publishedDate != null) {
         if (m.publishedDate!.compareTo(_filters.dateFrom!) < 0) return false;
       }
       if (_filters.dateTo != null && m.publishedDate != null) {
         if (m.publishedDate!.compareTo(_filters.dateTo!) > 0) return false;
       }
-      // Progress filter
       switch (_filters.progress) {
         case ProgressFilter.notStarted: if (m.progress > 0) return false; break;
         case ProgressFilter.inProgress: if (m.progress == 0 || m.progress == 100) return false; break;
@@ -290,9 +289,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   void _clearFilters() => setState(() => _filters = const _LibraryFilters());
 
-  // helper to get raw map for a module
-  Map<String, dynamic> _getRaw(ModuleModel module) => _selectedRaw ?? {};
-
   @override
   Widget build(BuildContext context) {
     if (_selectedModule != null) return _buildModuleDetail(_selectedModule!);
@@ -310,31 +306,62 @@ class _LibraryScreenState extends State<LibraryScreen> {
             children: [
               Row(
                 children: [
-                  const Icon(Icons.local_library_rounded, color: AppColors.primary, size: 22),
+                  const Icon(Icons.local_library_rounded,
+                      color: AppColors.primary, size: 22),
                   const SizedBox(width: 8),
-                  Text('Module Library', style: GoogleFonts.nunito(fontSize: 20, fontWeight: FontWeight.w900, color: AppColors.textDark)),
+                  Text('Module Library',
+                      style: GoogleFonts.nunito(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w900,
+                          color: AppColors.textDark)),
                   const Spacer(),
                   GestureDetector(
                     onTap: _showFilterSheet,
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 7),
                       decoration: BoxDecoration(
-                        color: _filters.hasActiveFilters ? AppColors.primary.withOpacity(0.1) : AppColors.background,
+                        color: _filters.hasActiveFilters
+                            ? AppColors.primary.withOpacity(0.1)
+                            : AppColors.background,
                         borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: _filters.hasActiveFilters ? AppColors.primary : AppColors.border, width: 1.5),
+                        border: Border.all(
+                            color: _filters.hasActiveFilters
+                                ? AppColors.primary
+                                : AppColors.border,
+                            width: 1.5),
                       ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.tune_rounded, size: 16, color: _filters.hasActiveFilters ? AppColors.primary : AppColors.textMid),
+                          Icon(Icons.tune_rounded,
+                              size: 16,
+                              color: _filters.hasActiveFilters
+                                  ? AppColors.primary
+                                  : AppColors.textMid),
                           const SizedBox(width: 5),
-                          Text('Filter', style: GoogleFonts.nunito(fontSize: 12, fontWeight: FontWeight.w700, color: _filters.hasActiveFilters ? AppColors.primary : AppColors.textMid)),
+                          Text('Filter',
+                              style: GoogleFonts.nunito(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  color: _filters.hasActiveFilters
+                                      ? AppColors.primary
+                                      : AppColors.textMid)),
                           if (_activeFilterCount > 0) ...[
                             const SizedBox(width: 5),
                             Container(
-                              width: 17, height: 17,
-                              decoration: const BoxDecoration(color: AppColors.primary, shape: BoxShape.circle),
-                              child: Center(child: Text('$_activeFilterCount', style: GoogleFonts.nunito(fontSize: 10, fontWeight: FontWeight.w800, color: Colors.white))),
+                              width: 17,
+                              height: 17,
+                              decoration: const BoxDecoration(
+                                  color: AppColors.primary,
+                                  shape: BoxShape.circle),
+                              child: Center(
+                                child: Text('$_activeFilterCount',
+                                    style: GoogleFonts.nunito(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w800,
+                                        color: Colors.white)),
+                              ),
                             ),
                           ],
                         ],
@@ -347,19 +374,34 @@ class _LibraryScreenState extends State<LibraryScreen> {
               TextField(
                 controller: _searchCtrl,
                 onChanged: (v) => setState(() => _search = v),
-                style: GoogleFonts.nunito(fontSize: 14, color: AppColors.textDark),
+                style: GoogleFonts.nunito(
+                    fontSize: 14, color: AppColors.textDark),
                 decoration: InputDecoration(
                   hintText: 'Search modules...',
-                  hintStyle: GoogleFonts.nunito(color: AppColors.textLight),
-                  prefixIcon: const Icon(Icons.search, color: AppColors.textLight, size: 20),
+                  hintStyle:
+                      GoogleFonts.nunito(color: AppColors.textLight),
+                  prefixIcon: const Icon(Icons.search,
+                      color: AppColors.textLight, size: 20),
                   suffixIcon: _search.isNotEmpty
-                      ? IconButton(icon: const Icon(Icons.close, color: AppColors.textLight, size: 18), onPressed: () { _searchCtrl.clear(); setState(() => _search = ''); })
+                      ? IconButton(
+                          icon: const Icon(Icons.close,
+                              color: AppColors.textLight, size: 18),
+                          onPressed: () {
+                            _searchCtrl.clear();
+                            setState(() => _search = '');
+                          })
                       : null,
                   filled: true,
                   fillColor: AppColors.background,
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
-                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: AppColors.border, width: 1.5)),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: BorderSide.none),
+                  enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: const BorderSide(
+                          color: AppColors.border, width: 1.5)),
+                  contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 12),
                 ),
               ),
             ],
@@ -371,50 +413,105 @@ class _LibraryScreenState extends State<LibraryScreen> {
         if (!_loading)
           Container(
             color: AppColors.background,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+            padding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
             child: Row(children: [
-              Text('${_filtered.length} of ${_modules.length} modules', style: GoogleFonts.nunito(fontSize: 12, color: AppColors.textLight)),
+              Text('${_filtered.length} of ${_modules.length} modules',
+                  style: GoogleFonts.nunito(
+                      fontSize: 12, color: AppColors.textLight)),
             ]),
           ),
 
         Expanded(
           child: _loading
-              ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
+              ? const Center(
+                  child: CircularProgressIndicator(
+                      color: AppColors.primary))
               : RefreshIndicator(
                   onRefresh: _load,
                   child: _filtered.isEmpty
                       ? ListView(children: [
                           const SizedBox(height: 80),
-                          Center(child: Column(children: [
-                            Icon(_filters.hasActiveFilters || _search.isNotEmpty ? Icons.search_off_rounded : Icons.menu_book_outlined, size: 48, color: AppColors.textLight),
-                            const SizedBox(height: 12),
-                            Text(_filters.hasActiveFilters || _search.isNotEmpty ? 'No modules match your filters' : 'No modules found',
-                                style: GoogleFonts.nunito(color: AppColors.textLight, fontWeight: FontWeight.w700)),
-                            if (_filters.hasActiveFilters) ...[
-                              const SizedBox(height: 8),
-                              TextButton(onPressed: _clearFilters, child: Text('Clear filters', style: GoogleFonts.nunito(color: AppColors.primary, fontWeight: FontWeight.w700))),
-                            ],
-                          ])),
+                          Center(
+                            child: Column(children: [
+                              Icon(
+                                _filters.hasActiveFilters ||
+                                        _search.isNotEmpty
+                                    ? Icons.search_off_rounded
+                                    : Icons.menu_book_outlined,
+                                size: 48,
+                                color: AppColors.textLight,
+                              ),
+                              const SizedBox(height: 12),
+                              Text(
+                                _filters.hasActiveFilters ||
+                                        _search.isNotEmpty
+                                    ? 'No modules match your filters'
+                                    : 'No modules found',
+                                style: GoogleFonts.nunito(
+                                    color: AppColors.textLight,
+                                    fontWeight: FontWeight.w700),
+                              ),
+                              if (_filters.hasActiveFilters) ...[
+                                const SizedBox(height: 8),
+                                TextButton(
+                                  onPressed: _clearFilters,
+                                  child: Text('Clear filters',
+                                      style: GoogleFonts.nunito(
+                                          color: AppColors.primary,
+                                          fontWeight: FontWeight.w700)),
+                                ),
+                              ],
+                            ]),
+                          ),
                         ])
                       : ListView.separated(
                           controller: _scrollController,
                           padding: const EdgeInsets.all(16),
-                          itemCount: _filtered.length + (_loadingMore ? 1 : 0) + (!_hasMore && _modules.isNotEmpty && _search.isEmpty && !_filters.hasActiveFilters ? 1 : 0),
-                          separatorBuilder: (_, __) => const SizedBox(height: 12),
+                          itemCount: _filtered.length +
+                              (_loadingMore ? 1 : 0) +
+                              (!_hasMore &&
+                                      _modules.isNotEmpty &&
+                                      _search.isEmpty &&
+                                      !_filters.hasActiveFilters
+                                  ? 1
+                                  : 0),
+                          separatorBuilder: (_, __) =>
+                              const SizedBox(height: 12),
                           itemBuilder: (ctx, i) {
                             if (i == _filtered.length && _loadingMore) {
-                              return const Padding(padding: EdgeInsets.symmetric(vertical: 16), child: Center(child: CircularProgressIndicator(color: AppColors.primary, strokeWidth: 2)));
+                              return const Padding(
+                                padding: EdgeInsets.symmetric(vertical: 16),
+                                child: Center(
+                                    child: CircularProgressIndicator(
+                                        color: AppColors.primary,
+                                        strokeWidth: 2)),
+                              );
                             }
                             if (i == _filtered.length && !_hasMore) {
-                              return Padding(padding: const EdgeInsets.symmetric(vertical: 16), child: Center(child: Text('All ${_modules.length} modules loaded', style: GoogleFonts.nunito(fontSize: 12, color: AppColors.textLight))));
+                              return Padding(
+                                padding: const EdgeInsets.symmetric(
+                                    vertical: 16),
+                                child: Center(
+                                    child: Text(
+                                        'All ${_modules.length} modules loaded',
+                                        style: GoogleFonts.nunito(
+                                            fontSize: 12,
+                                            color: AppColors.textLight))),
+                              );
                             }
                             final module = _filtered[i];
-                            // find raw data — we need to re-fetch from supabase or store raws
-                            return _ModuleCard(module: module, onTap: () async {
-                              // fetch raw for this module to get metadata
-                              final raw = await _supabase.from('modules').select('author, published_date, tags').eq('id', module.id).maybeSingle();
-                              _openModule(module, raw ?? {});
-                            });
+                            return _ModuleCard(
+                              module: module,
+                              onTap: () async {
+                                final raw = await _supabase
+                                    .from('modules')
+                                    .select('author, published_date, tags')
+                                    .eq('id', module.id)
+                                    .maybeSingle();
+                                _openModule(module, raw ?? {});
+                              },
+                            );
                           },
                         ),
                 ),
@@ -423,6 +520,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     );
   }
 
+  // ── Active filters row ─────────────────────────────────
   Widget _buildActiveFiltersRow() {
     return Container(
       color: Colors.white,
@@ -434,27 +532,53 @@ class _LibraryScreenState extends State<LibraryScreen> {
               scrollDirection: Axis.horizontal,
               child: Row(children: [
                 if (_filters.progress != ProgressFilter.all)
-                  _ActiveChip(label: _progressLabel(_filters.progress), onRemove: () => setState(() => _filters = _filters.copyWith(progress: ProgressFilter.all))),
+                  _ActiveChip(
+                    label: _progressLabel(_filters.progress),
+                    onRemove: () => setState(() => _filters =
+                        _filters.copyWith(progress: ProgressFilter.all)),
+                  ),
                 if (_filters.categoryName != null) ...[
                   const SizedBox(width: 6),
-                  _ActiveChip(label: _filters.categoryName!, onRemove: () => setState(() => _filters = _filters.copyWith(categoryName: null))),
+                  _ActiveChip(
+                    label: _filters.categoryName!,
+                    onRemove: () => setState(() => _filters =
+                        _filters.copyWith(categoryName: null)),
+                  ),
                 ],
+                // ── Author chip — icon instead of emoji ──
                 if (_filters.author != null) ...[
                   const SizedBox(width: 6),
-                  _ActiveChip(label: '👤 ${_filters.author!}', onRemove: () => setState(() => _filters = _filters.copyWith(author: null))),
+                  _ActiveChipWithIcon(
+                    icon: Icons.person_outline,
+                    label: _filters.author!,
+                    onRemove: () => setState(
+                        () => _filters = _filters.copyWith(author: null)),
+                  ),
                 ],
-                if (_filters.dateFrom != null || _filters.dateTo != null) ...[
+                // ── Date chip — icon instead of emoji ──
+                if (_filters.dateFrom != null ||
+                    _filters.dateTo != null) ...[
                   const SizedBox(width: 6),
-                  _ActiveChip(
-                    label: '📅 ${_filters.dateFrom ?? '...'} → ${_filters.dateTo ?? '...'}',
-                    onRemove: () => setState(() => _filters = _filters.copyWith(dateFrom: null, dateTo: null)),
+                  _ActiveChipWithIcon(
+                    icon: Icons.calendar_today_outlined,
+                    label:
+                        '${_filters.dateFrom ?? '...'} → ${_filters.dateTo ?? '...'}',
+                    onRemove: () => setState(() => _filters =
+                        _filters.copyWith(dateFrom: null, dateTo: null)),
                   ),
                 ],
               ]),
             ),
           ),
           const SizedBox(width: 8),
-          GestureDetector(onTap: _clearFilters, child: Text('Clear all', style: GoogleFonts.nunito(fontSize: 12, color: AppColors.primary, fontWeight: FontWeight.w800))),
+          GestureDetector(
+            onTap: _clearFilters,
+            child: Text('Clear all',
+                style: GoogleFonts.nunito(
+                    fontSize: 12,
+                    color: AppColors.primary,
+                    fontWeight: FontWeight.w800)),
+          ),
         ],
       ),
     );
@@ -472,7 +596,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   void _showFilterSheet() {
     showModalBottomSheet(
-      context: context, backgroundColor: Colors.transparent, isScrollControlled: true,
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
       builder: (_) => _FilterSheet(
         categories: _categories,
         authors: _authors,
@@ -501,18 +627,31 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
     return Column(
       children: [
-        // Header
         Container(
           decoration: const BoxDecoration(
-            gradient: LinearGradient(colors: [AppColors.primaryDark, AppColors.primary], begin: Alignment.topLeft, end: Alignment.bottomRight),
+            gradient: LinearGradient(
+                colors: [AppColors.primaryDark, AppColors.primary],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight),
           ),
           padding: const EdgeInsets.fromLTRB(8, 16, 16, 20),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(children: [
-                IconButton(onPressed: () => setState(() { _selectedModule = null; _selectedRaw = null; }), icon: const Icon(Icons.chevron_left, color: Colors.white)),
-                Expanded(child: Text(module.title, style: GoogleFonts.nunito(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 16), overflow: TextOverflow.ellipsis)),
+                IconButton(
+                  onPressed: () => setState(
+                      () {_selectedModule = null; _selectedRaw = null;}),
+                  icon: const Icon(Icons.chevron_left, color: Colors.white),
+                ),
+                Expanded(
+                  child: Text(module.title,
+                      style: GoogleFonts.nunito(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w900,
+                          fontSize: 16),
+                      overflow: TextOverflow.ellipsis),
+                ),
               ]),
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
@@ -520,15 +659,31 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(children: [
-                      BadgeChip(label: module.category, color: Colors.white.withOpacity(0.3)),
+                      BadgeChip(
+                          label: module.category,
+                          color: Colors.white.withOpacity(0.3)),
                       const SizedBox(width: 8),
-                      BadgeChip(label: progress == 100 ? 'Completed' : '$progress%', color: Colors.white.withOpacity(0.3)),
-                      if (progress == 100) ...[const SizedBox(width: 4), const Icon(Icons.check_circle, color: Colors.white, size: 14)],
+                      BadgeChip(
+                          label: progress == 100
+                              ? 'Completed'
+                              : '$progress%',
+                          color: Colors.white.withOpacity(0.3)),
+                      if (progress == 100) ...[
+                        const SizedBox(width: 4),
+                        const Icon(Icons.check_circle,
+                            color: Colors.white, size: 14),
+                      ],
                     ]),
                     const SizedBox(height: 10),
                     ClipRRect(
                       borderRadius: BorderRadius.circular(6),
-                      child: LinearProgressIndicator(value: progress / 100, backgroundColor: Colors.white.withOpacity(0.2), valueColor: const AlwaysStoppedAnimation<Color>(Colors.white), minHeight: 6),
+                      child: LinearProgressIndicator(
+                        value: progress / 100,
+                        backgroundColor: Colors.white.withOpacity(0.2),
+                        valueColor: const AlwaysStoppedAnimation<Color>(
+                            Colors.white),
+                        minHeight: 6,
+                      ),
                     ),
                   ],
                 ),
@@ -537,47 +692,67 @@ class _LibraryScreenState extends State<LibraryScreen> {
           ),
         ),
 
-        // Content
         Expanded(
           child: ListView(
             padding: const EdgeInsets.all(16),
             children: [
-              // About + Metadata card
               AppCard(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('About this Module', style: GoogleFonts.nunito(fontWeight: FontWeight.w800, fontSize: 14, color: AppColors.textDark)),
+                    Text('About this Module',
+                        style: GoogleFonts.nunito(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 14,
+                            color: AppColors.textDark)),
                     const SizedBox(height: 8),
-                    if (module.description != null && module.description!.isNotEmpty) ...[
-                      Text(module.description!, style: GoogleFonts.nunito(fontSize: 13, color: AppColors.textMid, height: 1.5)),
+                    if (module.description != null &&
+                        module.description!.isNotEmpty) ...[
+                      Text(module.description!,
+                          style: GoogleFonts.nunito(
+                              fontSize: 13,
+                              color: AppColors.textMid,
+                              height: 1.5)),
                       const SizedBox(height: 12),
                     ],
-                    // ── Metadata row ──
                     if (author != null || pubDate != null) ...[
                       const Divider(height: 1),
                       const SizedBox(height: 12),
                       Wrap(spacing: 16, runSpacing: 8, children: [
                         if (author != null && author.isNotEmpty)
-                          _MetaChip(icon: Icons.person_outline, label: author),
+                          _MetaChip(
+                              icon: Icons.person_outline, label: author),
                         if (pubDate != null && pubDate.isNotEmpty)
-                          _MetaChip(icon: Icons.calendar_today_outlined, label: _formatDate(pubDate)),
+                          _MetaChip(
+                              icon: Icons.calendar_today_outlined,
+                              label: _formatDate(pubDate)),
                       ]),
                     ],
-                    // ── Tags ──
                     if (tags != null && tags.isNotEmpty) ...[
                       const SizedBox(height: 10),
-                      Wrap(spacing: 6, runSpacing: 6, children: [
-                        ...tags.map((tag) => Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: AppColors.primary.withOpacity(0.08),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: AppColors.primary.withOpacity(0.2)),
-                          ),
-                          child: Text('#$tag', style: GoogleFonts.nunito(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.primary)),
-                        )),
-                      ]),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: [
+                          ...tags.map((tag) => Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 3),
+                            decoration: BoxDecoration(
+                              color:
+                                  AppColors.primary.withOpacity(0.08),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                  color: AppColors.primary
+                                      .withOpacity(0.2)),
+                            ),
+                            child: Text('#$tag',
+                                style: GoogleFonts.nunito(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
+                                    color: AppColors.primary)),
+                          )),
+                        ],
+                      ),
                     ],
                   ],
                 ),
@@ -585,7 +760,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
               const SizedBox(height: 12),
 
-              // Files card
               AppCard(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -594,25 +768,41 @@ class _LibraryScreenState extends State<LibraryScreen> {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Row(children: [
-                          const Icon(Icons.folder_open_outlined, size: 18, color: AppColors.textDark),
+                          const Icon(Icons.folder_open_outlined,
+                              size: 18, color: AppColors.textDark),
                           const SizedBox(width: 6),
-                          Text('Module Files', style: GoogleFonts.nunito(fontWeight: FontWeight.w800, fontSize: 14, color: AppColors.textDark)),
+                          Text('Module Files',
+                              style: GoogleFonts.nunito(
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 14,
+                                  color: AppColors.textDark)),
                         ]),
                         if (_moduleFiles.isNotEmpty)
-                          Text('${_moduleFiles.length} file${_moduleFiles.length > 1 ? 's' : ''}', style: GoogleFonts.nunito(fontSize: 12, color: AppColors.textLight)),
+                          Text(
+                              '${_moduleFiles.length} file${_moduleFiles.length > 1 ? 's' : ''}',
+                              style: GoogleFonts.nunito(
+                                  fontSize: 12,
+                                  color: AppColors.textLight)),
                       ],
                     ),
                     const SizedBox(height: 12),
                     if (_loadingFiles)
-                      const Center(child: CircularProgressIndicator(color: AppColors.primary))
+                      const Center(
+                          child: CircularProgressIndicator(
+                              color: AppColors.primary))
                     else if (_moduleFiles.isEmpty)
                       Column(children: [
-                        const Icon(Icons.folder_open_outlined, size: 36, color: AppColors.textLight),
+                        const Icon(Icons.folder_open_outlined,
+                            size: 36, color: AppColors.textLight),
                         const SizedBox(height: 8),
-                        Text('No files uploaded yet.', style: GoogleFonts.nunito(color: AppColors.textLight, fontSize: 13)),
+                        Text('No files uploaded yet.',
+                            style: GoogleFonts.nunito(
+                                color: AppColors.textLight,
+                                fontSize: 13)),
                       ])
                     else
-                      ..._moduleFiles.map((f) => _FileTile(file: f, onTap: () => _openFile(f))),
+                      ..._moduleFiles.map(
+                          (f) => _FileTile(file: f, onTap: () => _openFile(f))),
                   ],
                 ),
               ),
@@ -623,11 +813,34 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 width: double.infinity,
                 child: OutlinedButton.icon(
                   onPressed: () {
-                    Navigator.push(context, MaterialPageRoute(builder: (_) => AssessmentScreen(moduleId: module.id, moduleTitle: module.title, onComplete: () { Navigator.pop(context); _load(); })));
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => AssessmentScreen(
+                          moduleId:    module.id,
+                          moduleTitle: module.title,
+                          onComplete: () {
+                            Navigator.pop(context);
+                            _load();
+                          },
+                        ),
+                      ),
+                    );
                   },
-                  icon: const Icon(Icons.quiz_outlined, size: 20, color: AppColors.primary),
-                  label: Text('Take Assessment', style: GoogleFonts.nunito(fontWeight: FontWeight.w800, fontSize: 15, color: AppColors.primary)),
-                  style: OutlinedButton.styleFrom(side: const BorderSide(color: AppColors.primary, width: 1.5), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)), padding: const EdgeInsets.symmetric(vertical: 14)),
+                  icon: const Icon(Icons.quiz_outlined,
+                      size: 20, color: AppColors.primary),
+                  label: Text('Take Assessment',
+                      style: GoogleFonts.nunito(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 15,
+                          color: AppColors.primary)),
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(
+                        color: AppColors.primary, width: 1.5),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14)),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
                 ),
               ),
 
@@ -642,13 +855,18 @@ class _LibraryScreenState extends State<LibraryScreen> {
   String _formatDate(String iso) {
     try {
       final d = DateTime.parse(iso);
-      const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      const months = [
+        'Jan','Feb','Mar','Apr','May','Jun',
+        'Jul','Aug','Sep','Oct','Nov','Dec'
+      ];
       return '${d.day} ${months[d.month - 1]} ${d.year}';
-    } catch (_) { return iso; }
+    } catch (_) {
+      return iso;
+    }
   }
 }
 
-// ── Metadata chip ─────────────────────────────────────────
+// ── Metadata chip ──────────────────────────────────────────
 class _MetaChip extends StatelessWidget {
   final IconData icon;
   final String label;
@@ -659,12 +877,16 @@ class _MetaChip extends StatelessWidget {
     return Row(mainAxisSize: MainAxisSize.min, children: [
       Icon(icon, size: 13, color: AppColors.primary),
       const SizedBox(width: 5),
-      Text(label, style: GoogleFonts.nunito(fontSize: 12, color: AppColors.textMid, fontWeight: FontWeight.w600)),
+      Text(label,
+          style: GoogleFonts.nunito(
+              fontSize: 12,
+              color: AppColors.textMid,
+              fontWeight: FontWeight.w600)),
     ]);
   }
 }
 
-// ── Active filter chip ────────────────────────────────────
+// ── Active filter chip (text only) ────────────────────────
 class _ActiveChip extends StatelessWidget {
   final String label;
   final VoidCallback onRemove;
@@ -674,147 +896,406 @@ class _ActiveChip extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration: BoxDecoration(color: AppColors.primary.withOpacity(0.1), borderRadius: BorderRadius.circular(20), border: Border.all(color: AppColors.primary.withOpacity(0.3))),
+      decoration: BoxDecoration(
+        color: AppColors.primary.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppColors.primary.withOpacity(0.3)),
+      ),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
-        Text(label, style: GoogleFonts.nunito(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.primary)),
+        Text(label,
+            style: GoogleFonts.nunito(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: AppColors.primary)),
         const SizedBox(width: 5),
-        GestureDetector(onTap: onRemove, child: const Icon(Icons.close, size: 14, color: AppColors.primary)),
+        GestureDetector(
+            onTap: onRemove,
+            child: const Icon(Icons.close,
+                size: 14, color: AppColors.primary)),
       ]),
     );
   }
 }
 
-// ── Filter bottom sheet ───────────────────────────────────
+// ── Active filter chip (icon + text) — replaces emoji chips
+class _ActiveChipWithIcon extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onRemove;
+  const _ActiveChipWithIcon({
+    required this.icon,
+    required this.label,
+    required this.onRemove,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: AppColors.primary.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppColors.primary.withOpacity(0.3)),
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(icon, size: 13, color: AppColors.primary),
+        const SizedBox(width: 4),
+        Text(label,
+            style: GoogleFonts.nunito(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: AppColors.primary)),
+        const SizedBox(width: 5),
+        GestureDetector(
+            onTap: onRemove,
+            child: const Icon(Icons.close,
+                size: 14, color: AppColors.primary)),
+      ]),
+    );
+  }
+}
+
+// ── Filter bottom sheet ────────────────────────────────────
 class _FilterSheet extends StatefulWidget {
   final List<String> categories;
   final List<String> authors;
   final _LibraryFilters currentFilters;
   final ValueChanged<_LibraryFilters> onApply;
-  const _FilterSheet({required this.categories, required this.authors, required this.currentFilters, required this.onApply});
+  const _FilterSheet({
+    required this.categories,
+    required this.authors,
+    required this.currentFilters,
+    required this.onApply,
+  });
   @override
   State<_FilterSheet> createState() => _FilterSheetState();
 }
 
 class _FilterSheetState extends State<_FilterSheet> {
   late _LibraryFilters _local;
+
   @override
-  void initState() { super.initState(); _local = widget.currentFilters; }
+  void initState() {
+    super.initState();
+    _local = widget.currentFilters;
+  }
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
-      padding: EdgeInsets.fromLTRB(24, 16, 24, MediaQuery.of(context).viewInsets.bottom + 32),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      padding: EdgeInsets.fromLTRB(
+          24, 16, 24, MediaQuery.of(context).viewInsets.bottom + 32),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: AppColors.border, borderRadius: BorderRadius.circular(2)))),
+          Center(
+            child: Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                  color: AppColors.border,
+                  borderRadius: BorderRadius.circular(2)),
+            ),
+          ),
           const SizedBox(height: 20),
           Row(children: [
-            Text('Filter Modules', style: GoogleFonts.nunito(fontSize: 18, fontWeight: FontWeight.w900, color: AppColors.textDark)),
+            Text('Filter Modules',
+                style: GoogleFonts.nunito(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w900,
+                    color: AppColors.textDark)),
             const Spacer(),
-            TextButton(onPressed: () => setState(() => _local = const _LibraryFilters()), child: Text('Reset', style: GoogleFonts.nunito(color: AppColors.primary, fontWeight: FontWeight.w700))),
+            TextButton(
+              onPressed: () =>
+                  setState(() => _local = const _LibraryFilters()),
+              child: Text('Reset',
+                  style: GoogleFonts.nunito(
+                      color: AppColors.primary,
+                      fontWeight: FontWeight.w700)),
+            ),
           ]),
           const SizedBox(height: 18),
-          Text('Progress', style: GoogleFonts.nunito(fontSize: 13, fontWeight: FontWeight.w800, color: AppColors.textMid)),
+
+          // Progress
+          Text('Progress',
+              style: GoogleFonts.nunito(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.textMid)),
           const SizedBox(height: 10),
           Wrap(spacing: 8, runSpacing: 8, children: [
-            _SheetChip(label: 'All', selected: _local.progress == ProgressFilter.all, onTap: () => setState(() => _local = _local.copyWith(progress: ProgressFilter.all))),
-            _SheetChip(label: 'Not Started', icon: Icons.radio_button_unchecked, selected: _local.progress == ProgressFilter.notStarted, onTap: () => setState(() => _local = _local.copyWith(progress: ProgressFilter.notStarted))),
-            _SheetChip(label: 'In Progress', icon: Icons.pending_rounded, selected: _local.progress == ProgressFilter.inProgress, onTap: () => setState(() => _local = _local.copyWith(progress: ProgressFilter.inProgress))),
-            _SheetChip(label: 'Completed', icon: Icons.check_circle_outline_rounded, selected: _local.progress == ProgressFilter.completed, onTap: () => setState(() => _local = _local.copyWith(progress: ProgressFilter.completed))),
+            _SheetChip(
+              label: 'All',
+              selected: _local.progress == ProgressFilter.all,
+              onTap: () => setState(() =>
+                  _local = _local.copyWith(progress: ProgressFilter.all)),
+            ),
+            _SheetChip(
+              label: 'Not Started',
+              icon: Icons.radio_button_unchecked,
+              selected: _local.progress == ProgressFilter.notStarted,
+              onTap: () => setState(() => _local =
+                  _local.copyWith(progress: ProgressFilter.notStarted)),
+            ),
+            _SheetChip(
+              label: 'In Progress',
+              icon: Icons.pending_rounded,
+              selected: _local.progress == ProgressFilter.inProgress,
+              onTap: () => setState(() => _local =
+                  _local.copyWith(progress: ProgressFilter.inProgress)),
+            ),
+            _SheetChip(
+              label: 'Completed',
+              icon: Icons.check_circle_outline_rounded,
+              selected: _local.progress == ProgressFilter.completed,
+              onTap: () => setState(() => _local =
+                  _local.copyWith(progress: ProgressFilter.completed)),
+            ),
           ]),
+
           // Category
           if (widget.categories.isNotEmpty) ...[
             const SizedBox(height: 20),
-            Text('Category', style: GoogleFonts.nunito(fontSize: 13, fontWeight: FontWeight.w800, color: AppColors.textMid)),
+            Text('Category',
+                style: GoogleFonts.nunito(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.textMid)),
             const SizedBox(height: 10),
             Wrap(spacing: 8, runSpacing: 8, children: [
-              _SheetChip(label: 'All', selected: _local.categoryName == null, onTap: () => setState(() => _local = _local.copyWith(categoryName: null))),
-              ...widget.categories.map((cat) => _SheetChip(label: cat, selected: _local.categoryName == cat, onTap: () => setState(() => _local = _local.copyWith(categoryName: cat)))),
+              _SheetChip(
+                label: 'All',
+                selected: _local.categoryName == null,
+                onTap: () => setState(
+                    () => _local = _local.copyWith(categoryName: null)),
+              ),
+              ...widget.categories.map((cat) => _SheetChip(
+                    label: cat,
+                    selected: _local.categoryName == cat,
+                    onTap: () => setState(
+                        () => _local = _local.copyWith(categoryName: cat)),
+                  )),
             ]),
           ],
+
           // Author
           if (widget.authors.isNotEmpty) ...[
             const SizedBox(height: 20),
-            Text('Author', style: GoogleFonts.nunito(fontSize: 13, fontWeight: FontWeight.w800, color: AppColors.textMid)),
+            Text('Author',
+                style: GoogleFonts.nunito(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.textMid)),
             const SizedBox(height: 10),
             Wrap(spacing: 8, runSpacing: 8, children: [
-              _SheetChip(label: 'All', selected: _local.author == null, onTap: () => setState(() => _local = _local.copyWith(author: null))),
+              _SheetChip(
+                label: 'All',
+                selected: _local.author == null,
+                onTap: () => setState(
+                    () => _local = _local.copyWith(author: null)),
+              ),
               ...widget.authors.map((a) => _SheetChip(
-                label: a, icon: Icons.person_outline,
-                selected: _local.author == a,
-                onTap: () => setState(() => _local = _local.copyWith(author: a)),
-              )),
+                    label: a,
+                    icon: Icons.person_outline,
+                    selected: _local.author == a,
+                    onTap: () => setState(
+                        () => _local = _local.copyWith(author: a)),
+                  )),
             ]),
           ],
+
           // Date Range
           const SizedBox(height: 20),
-          Text('Publication Date Range', style: GoogleFonts.nunito(fontSize: 13, fontWeight: FontWeight.w800, color: AppColors.textMid)),
+          Text('Publication Date Range',
+              style: GoogleFonts.nunito(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.textMid)),
           const SizedBox(height: 10),
           Row(children: [
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('From', style: GoogleFonts.nunito(fontSize: 11, color: AppColors.textLight)),
-              const SizedBox(height: 4),
-              GestureDetector(
-                onTap: () async {
-                  final picked = await showDatePicker(
-                    context: context,
-                    initialDate: _local.dateFrom != null ? DateTime.tryParse(_local.dateFrom!) ?? DateTime.now() : DateTime(2020),
-                    firstDate: DateTime(2020),
-                    lastDate: DateTime.now(),
-                    builder: (ctx, child) => Theme(data: Theme.of(ctx).copyWith(colorScheme: const ColorScheme.light(primary: AppColors.primary)), child: child!),
-                  );
-                  if (picked != null) setState(() => _local = _local.copyWith(dateFrom: picked.toIso8601String().split('T')[0]));
-                },
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  decoration: BoxDecoration(color: _local.dateFrom != null ? AppColors.primary.withOpacity(0.08) : AppColors.background, borderRadius: BorderRadius.circular(10), border: Border.all(color: _local.dateFrom != null ? AppColors.primary : AppColors.border)),
-                  child: Row(children: [
-                    Icon(Icons.calendar_today_outlined, size: 14, color: _local.dateFrom != null ? AppColors.primary : AppColors.textLight),
-                    const SizedBox(width: 6),
-                    Text(_local.dateFrom ?? 'Select date', style: GoogleFonts.nunito(fontSize: 12, color: _local.dateFrom != null ? AppColors.primary : AppColors.textLight, fontWeight: _local.dateFrom != null ? FontWeight.w700 : FontWeight.w400)),
-                    if (_local.dateFrom != null) ...[const Spacer(), GestureDetector(onTap: () => setState(() => _local = _local.copyWith(dateFrom: null)), child: const Icon(Icons.close, size: 14, color: AppColors.primary))],
-                  ]),
-                ),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('From',
+                      style: GoogleFonts.nunito(
+                          fontSize: 11, color: AppColors.textLight)),
+                  const SizedBox(height: 4),
+                  GestureDetector(
+                    onTap: () async {
+                      final picked = await showDatePicker(
+                        context: context,
+                        initialDate: _local.dateFrom != null
+                            ? DateTime.tryParse(_local.dateFrom!) ??
+                                DateTime.now()
+                            : DateTime(2020),
+                        firstDate: DateTime(2020),
+                        lastDate: DateTime.now(),
+                        builder: (ctx, child) => Theme(
+                          data: Theme.of(ctx).copyWith(
+                              colorScheme: const ColorScheme.light(
+                                  primary: AppColors.primary)),
+                          child: child!,
+                        ),
+                      );
+                      if (picked != null) {
+                        setState(() => _local = _local.copyWith(
+                            dateFrom:
+                                picked.toIso8601String().split('T')[0]));
+                      }
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: _local.dateFrom != null
+                            ? AppColors.primary.withOpacity(0.08)
+                            : AppColors.background,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                            color: _local.dateFrom != null
+                                ? AppColors.primary
+                                : AppColors.border),
+                      ),
+                      child: Row(children: [
+                        Icon(Icons.calendar_today_outlined,
+                            size: 14,
+                            color: _local.dateFrom != null
+                                ? AppColors.primary
+                                : AppColors.textLight),
+                        const SizedBox(width: 6),
+                        Text(
+                          _local.dateFrom ?? 'Select date',
+                          style: GoogleFonts.nunito(
+                            fontSize: 12,
+                            color: _local.dateFrom != null
+                                ? AppColors.primary
+                                : AppColors.textLight,
+                            fontWeight: _local.dateFrom != null
+                                ? FontWeight.w700
+                                : FontWeight.w400,
+                          ),
+                        ),
+                        if (_local.dateFrom != null) ...[
+                          const Spacer(),
+                          GestureDetector(
+                            onTap: () => setState(() => _local =
+                                _local.copyWith(dateFrom: null)),
+                            child: const Icon(Icons.close,
+                                size: 14, color: AppColors.primary),
+                          ),
+                        ],
+                      ]),
+                    ),
+                  ),
+                ],
               ),
-            ])),
+            ),
             const SizedBox(width: 10),
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('To', style: GoogleFonts.nunito(fontSize: 11, color: AppColors.textLight)),
-              const SizedBox(height: 4),
-              GestureDetector(
-                onTap: () async {
-                  final picked = await showDatePicker(
-                    context: context,
-                    initialDate: _local.dateTo != null ? DateTime.tryParse(_local.dateTo!) ?? DateTime.now() : DateTime.now(),
-                    firstDate: DateTime(2020),
-                    lastDate: DateTime.now(),
-                    builder: (ctx, child) => Theme(data: Theme.of(ctx).copyWith(colorScheme: const ColorScheme.light(primary: AppColors.primary)), child: child!),
-                  );
-                  if (picked != null) setState(() => _local = _local.copyWith(dateTo: picked.toIso8601String().split('T')[0]));
-                },
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  decoration: BoxDecoration(color: _local.dateTo != null ? AppColors.primary.withOpacity(0.08) : AppColors.background, borderRadius: BorderRadius.circular(10), border: Border.all(color: _local.dateTo != null ? AppColors.primary : AppColors.border)),
-                  child: Row(children: [
-                    Icon(Icons.calendar_today_outlined, size: 14, color: _local.dateTo != null ? AppColors.primary : AppColors.textLight),
-                    const SizedBox(width: 6),
-                    Text(_local.dateTo ?? 'Select date', style: GoogleFonts.nunito(fontSize: 12, color: _local.dateTo != null ? AppColors.primary : AppColors.textLight, fontWeight: _local.dateTo != null ? FontWeight.w700 : FontWeight.w400)),
-                    if (_local.dateTo != null) ...[const Spacer(), GestureDetector(onTap: () => setState(() => _local = _local.copyWith(dateTo: null)), child: const Icon(Icons.close, size: 14, color: AppColors.primary))],
-                  ]),
-                ),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('To',
+                      style: GoogleFonts.nunito(
+                          fontSize: 11, color: AppColors.textLight)),
+                  const SizedBox(height: 4),
+                  GestureDetector(
+                    onTap: () async {
+                      final picked = await showDatePicker(
+                        context: context,
+                        initialDate: _local.dateTo != null
+                            ? DateTime.tryParse(_local.dateTo!) ??
+                                DateTime.now()
+                            : DateTime.now(),
+                        firstDate: DateTime(2020),
+                        lastDate: DateTime.now(),
+                        builder: (ctx, child) => Theme(
+                          data: Theme.of(ctx).copyWith(
+                              colorScheme: const ColorScheme.light(
+                                  primary: AppColors.primary)),
+                          child: child!,
+                        ),
+                      );
+                      if (picked != null) {
+                        setState(() => _local = _local.copyWith(
+                            dateTo:
+                                picked.toIso8601String().split('T')[0]));
+                      }
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: _local.dateTo != null
+                            ? AppColors.primary.withOpacity(0.08)
+                            : AppColors.background,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                            color: _local.dateTo != null
+                                ? AppColors.primary
+                                : AppColors.border),
+                      ),
+                      child: Row(children: [
+                        Icon(Icons.calendar_today_outlined,
+                            size: 14,
+                            color: _local.dateTo != null
+                                ? AppColors.primary
+                                : AppColors.textLight),
+                        const SizedBox(width: 6),
+                        Text(
+                          _local.dateTo ?? 'Select date',
+                          style: GoogleFonts.nunito(
+                            fontSize: 12,
+                            color: _local.dateTo != null
+                                ? AppColors.primary
+                                : AppColors.textLight,
+                            fontWeight: _local.dateTo != null
+                                ? FontWeight.w700
+                                : FontWeight.w400,
+                          ),
+                        ),
+                        if (_local.dateTo != null) ...[
+                          const Spacer(),
+                          GestureDetector(
+                            onTap: () => setState(() =>
+                                _local = _local.copyWith(dateTo: null)),
+                            child: const Icon(Icons.close,
+                                size: 14, color: AppColors.primary),
+                          ),
+                        ],
+                      ]),
+                    ),
+                  ),
+                ],
               ),
-            ])),
+            ),
           ]),
+
           const SizedBox(height: 28),
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
-              onPressed: () { widget.onApply(_local); Navigator.pop(context); },
-              style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)), padding: const EdgeInsets.symmetric(vertical: 14)),
-              child: Text('Apply Filters', style: GoogleFonts.nunito(fontSize: 15, fontWeight: FontWeight.w800, color: Colors.white)),
+              onPressed: () {
+                widget.onApply(_local);
+                Navigator.pop(context);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14)),
+                padding: const EdgeInsets.symmetric(vertical: 14),
+              ),
+              child: Text('Apply Filters',
+                  style: GoogleFonts.nunito(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.white)),
             ),
           ),
         ],
@@ -823,12 +1304,18 @@ class _FilterSheetState extends State<_FilterSheet> {
   }
 }
 
+// ── Sheet chip ─────────────────────────────────────────────
 class _SheetChip extends StatelessWidget {
   final String label;
   final IconData? icon;
   final bool selected;
   final VoidCallback onTap;
-  const _SheetChip({required this.label, required this.selected, required this.onTap, this.icon});
+  const _SheetChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    this.icon,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -836,22 +1323,40 @@ class _SheetChip extends StatelessWidget {
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        padding:
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         decoration: BoxDecoration(
-          color: selected ? AppColors.primary.withOpacity(0.1) : AppColors.background,
+          color: selected
+              ? AppColors.primary.withOpacity(0.1)
+              : AppColors.background,
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: selected ? AppColors.primary : AppColors.border, width: selected ? 1.5 : 1),
+          border: Border.all(
+              color: selected ? AppColors.primary : AppColors.border,
+              width: selected ? 1.5 : 1),
         ),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
-          if (icon != null) ...[Icon(icon, size: 13, color: selected ? AppColors.primary : AppColors.textMid), const SizedBox(width: 5)],
-          Text(label, style: GoogleFonts.nunito(fontSize: 13, fontWeight: selected ? FontWeight.w700 : FontWeight.w500, color: selected ? AppColors.primary : AppColors.textMid)),
+          if (icon != null) ...[
+            Icon(icon,
+                size: 13,
+                color:
+                    selected ? AppColors.primary : AppColors.textMid),
+            const SizedBox(width: 5),
+          ],
+          Text(label,
+              style: GoogleFonts.nunito(
+                  fontSize: 13,
+                  fontWeight:
+                      selected ? FontWeight.w700 : FontWeight.w500,
+                  color: selected
+                      ? AppColors.primary
+                      : AppColors.textMid)),
         ]),
       ),
     );
   }
 }
 
-// ── Module Card ───────────────────────────────────────────
+// ── Module Card ────────────────────────────────────────────
 class _ModuleCard extends StatelessWidget {
   final ModuleModel module;
   final VoidCallback onTap;
@@ -865,30 +1370,57 @@ class _ModuleCard extends StatelessWidget {
       child: AppCard(
         child: Row(
           children: [
-            Container(width: 52, height: 52, decoration: BoxDecoration(color: color.withOpacity(0.15), borderRadius: BorderRadius.circular(14)), child: Icon(Icons.menu_book_outlined, color: color, size: 24)),
+            Container(
+              width: 52,
+              height: 52,
+              decoration: BoxDecoration(
+                  color: color.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(14)),
+              child: Icon(Icons.menu_book_outlined, color: color, size: 24),
+            ),
             const SizedBox(width: 14),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(module.title, style: GoogleFonts.nunito(fontWeight: FontWeight.w800, fontSize: 14, color: AppColors.textDark), overflow: TextOverflow.ellipsis),
+                  Text(module.title,
+                      style: GoogleFonts.nunito(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 14,
+                          color: AppColors.textDark),
+                      overflow: TextOverflow.ellipsis),
                   const SizedBox(height: 4),
-                  Text(module.category, style: GoogleFonts.nunito(fontSize: 12, color: AppColors.textLight)),
+                  Text(module.category,
+                      style: GoogleFonts.nunito(
+                          fontSize: 12, color: AppColors.textLight)),
                   const SizedBox(height: 8),
                   AppProgressBar(value: module.progress, color: color),
                   const SizedBox(height: 4),
                   Row(children: [
-                    if (module.progress == 100) ...[const Icon(Icons.check_circle, size: 11, color: AppColors.primary), const SizedBox(width: 3)],
+                    if (module.progress == 100) ...[
+                      const Icon(Icons.check_circle,
+                          size: 11, color: AppColors.primary),
+                      const SizedBox(width: 3),
+                    ],
                     Text(
-                      module.progress == 100 ? 'Completed' : module.progress == 0 ? 'Not started' : '${module.progress}% complete',
-                      style: GoogleFonts.nunito(fontSize: 11, color: module.progress == 100 ? AppColors.primary : AppColors.textLight),
+                      module.progress == 100
+                          ? 'Completed'
+                          : module.progress == 0
+                              ? 'Not started'
+                              : '${module.progress}% complete',
+                      style: GoogleFonts.nunito(
+                          fontSize: 11,
+                          color: module.progress == 100
+                              ? AppColors.primary
+                              : AppColors.textLight),
                     ),
                   ]),
                 ],
               ),
             ),
             const SizedBox(width: 8),
-            const Icon(Icons.chevron_right, color: AppColors.textLight, size: 18),
+            const Icon(Icons.chevron_right,
+                color: AppColors.textLight, size: 18),
           ],
         ),
       ),
@@ -896,7 +1428,7 @@ class _ModuleCard extends StatelessWidget {
   }
 }
 
-// ── File Tile ─────────────────────────────────────────────
+// ── File Tile ──────────────────────────────────────────────
 class _FileTile extends StatelessWidget {
   final Map<String, dynamic> file;
   final VoidCallback onTap;
@@ -905,21 +1437,31 @@ class _FileTile extends StatelessWidget {
   IconData get _icon {
     final type = (file['file_type'] ?? '').toString().toLowerCase();
     final name = (file['file_name'] ?? '').toString().toLowerCase();
-    if (type.contains('pdf') || name.endsWith('.pdf'))   return Icons.picture_as_pdf_outlined;
-    if (type.contains('video') || name.endsWith('.mp4')) return Icons.play_circle_outline;
-    if (type.contains('image') || name.endsWith('.png') || name.endsWith('.jpg')) return Icons.image_outlined;
-    if (name.endsWith('.pptx') || name.endsWith('.ppt')) return Icons.slideshow_outlined;
-    if (name.endsWith('.docx') || name.endsWith('.doc')) return Icons.description_outlined;
+    if (type.contains('pdf') || name.endsWith('.pdf'))
+      return Icons.picture_as_pdf_outlined;
+    if (type.contains('video') || name.endsWith('.mp4'))
+      return Icons.play_circle_outline;
+    if (type.contains('image') ||
+        name.endsWith('.png') ||
+        name.endsWith('.jpg')) return Icons.image_outlined;
+    if (name.endsWith('.pptx') || name.endsWith('.ppt'))
+      return Icons.slideshow_outlined;
+    if (name.endsWith('.docx') || name.endsWith('.doc'))
+      return Icons.description_outlined;
     return Icons.insert_drive_file_outlined;
   }
 
   Color get _iconColor {
     final type = (file['file_type'] ?? '').toString().toLowerCase();
     final name = (file['file_name'] ?? '').toString().toLowerCase();
-    if (type.contains('pdf') || name.endsWith('.pdf'))   return Colors.red.shade400;
-    if (type.contains('video') || name.endsWith('.mp4')) return Colors.blue.shade400;
-    if (name.endsWith('.pptx') || name.endsWith('.ppt')) return Colors.orange.shade400;
-    if (name.endsWith('.docx') || name.endsWith('.doc')) return Colors.blue.shade600;
+    if (type.contains('pdf') || name.endsWith('.pdf'))
+      return Colors.red.shade400;
+    if (type.contains('video') || name.endsWith('.mp4'))
+      return Colors.blue.shade400;
+    if (name.endsWith('.pptx') || name.endsWith('.ppt'))
+      return Colors.orange.shade400;
+    if (name.endsWith('.docx') || name.endsWith('.doc'))
+      return Colors.blue.shade600;
     return AppColors.primary;
   }
 
@@ -937,25 +1479,55 @@ class _FileTile extends StatelessWidget {
       child: Container(
         margin: const EdgeInsets.only(bottom: 10),
         padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(color: AppColors.background, borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.border)),
+        decoration: BoxDecoration(
+          color: AppColors.background,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.border),
+        ),
         child: Row(
           children: [
-            Container(width: 40, height: 40, decoration: BoxDecoration(color: _iconColor.withOpacity(0.12), borderRadius: BorderRadius.circular(10)), child: Icon(_icon, color: _iconColor, size: 20)),
-            const SizedBox(width: 12),
-            Expanded(child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(file['file_name'] ?? 'File', style: GoogleFonts.nunito(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textDark), overflow: TextOverflow.ellipsis),
-                if (_fileSize.isNotEmpty) Text(_fileSize, style: GoogleFonts.nunito(fontSize: 11, color: AppColors.textLight)),
-              ],
-            )),
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(color: AppColors.primary.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                  color: _iconColor.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(10)),
+              child: Icon(_icon, color: _iconColor, size: 20),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(file['file_name'] ?? 'File',
+                      style: GoogleFonts.nunito(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textDark),
+                      overflow: TextOverflow.ellipsis),
+                  if (_fileSize.isNotEmpty)
+                    Text(_fileSize,
+                        style: GoogleFonts.nunito(
+                            fontSize: 11, color: AppColors.textLight)),
+                ],
+              ),
+            ),
+            Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: AppColors.primary.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
               child: Row(children: [
-                const Icon(Icons.open_in_new, size: 14, color: AppColors.primary),
+                const Icon(Icons.open_in_new,
+                    size: 14, color: AppColors.primary),
                 const SizedBox(width: 4),
-                Text('Open', style: GoogleFonts.nunito(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.primary)),
+                Text('Open',
+                    style: GoogleFonts.nunito(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.primary)),
               ]),
             ),
           ],
