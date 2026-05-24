@@ -21,90 +21,71 @@ final _supabase = Supabase.instance.client;
 // ─────────────────────────────────────────────────────────────────────────────
 const Map<String, List<String>> kCvsuDeptCourses = {
   'College of Agriculture, Food Technology and Forestry': [
-    'BS Agriculture',
-    'BS Food Technology',
-    'BS Forestry',
+    'BS Agriculture', 'BS Food Technology', 'BS Forestry',
     'BS Agricultural Engineering',
   ],
   'College of Arts and Sciences': [
-    'AB Communication',
-    'AB English Language Studies',
-    'BS Biology',
-    'BS Mathematics',
-    'BS Psychology',
-    'BS Statistics',
+    'AB Communication', 'AB English Language Studies', 'BS Biology',
+    'BS Mathematics', 'BS Psychology', 'BS Statistics',
   ],
   'College of Business Administration': [
-    'BS Accountancy',
-    'BS Business Administration',
-    'BS Entrepreneurship',
-    'BS Office Administration',
+    'BS Accountancy', 'BS Business Administration',
+    'BS Entrepreneurship', 'BS Office Administration',
   ],
-  'College of Criminal Justice Education': [
-    'BS Criminology',
-  ],
+  'College of Criminal Justice Education': ['BS Criminology'],
   'College of Education': [
-    'Bachelor of Elementary Education',
-    'Bachelor of Secondary Education',
-    'Bachelor of Physical Education',
-    'Bachelor of Early Childhood Education',
+    'Bachelor of Elementary Education', 'Bachelor of Secondary Education',
+    'Bachelor of Physical Education', 'Bachelor of Early Childhood Education',
     'BS Industrial Technology Education',
   ],
   'College of Engineering and Information Technology': [
-    'BS Civil Engineering',
-    'BS Computer Engineering',
-    'BS Electrical Engineering',
-    'BS Electronics Engineering',
-    'BS Mechanical Engineering',
-    'BS Information Technology',
+    'BS Civil Engineering', 'BS Computer Engineering',
+    'BS Electrical Engineering', 'BS Electronics Engineering',
+    'BS Mechanical Engineering', 'BS Information Technology',
     'BS Computer Science',
   ],
-  'College of Fisheries and Ocean Sciences': [
-    'BS Fisheries',
-  ],
+  'College of Fisheries and Ocean Sciences': ['BS Fisheries'],
   'College of Hospitality and Institutional Management': [
-    'BS Hotel and Restaurant Management',
-    'BS Tourism Management',
+    'BS Hotel and Restaurant Management', 'BS Tourism Management',
   ],
-  'College of Nursing': [
-    'BS Nursing',
-  ],
+  'College of Nursing': ['BS Nursing'],
   'College of Veterinary Medicine and Biomedical Sciences': [
-    'Doctor of Veterinary Medicine',
-    'BS Veterinary Technology',
+    'Doctor of Veterinary Medicine', 'BS Veterinary Technology',
   ],
   'Graduate School': [
-    'Master of Arts in Education',
-    'Master in Business Administration',
-    'Master of Science in Agriculture',
-    'Doctor of Philosophy',
+    'Master of Arts in Education', 'Master in Business Administration',
+    'Master of Science in Agriculture', 'Doctor of Philosophy',
   ],
 };
 
 const List<String> kYearLevels = [
-  '1st Year',
-  '2nd Year',
-  '3rd Year',
-  '4th Year',
-  '5th Year',
+  '1st Year', '2nd Year', '3rd Year', '4th Year', '5th Year',
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  NAME VALIDATOR
+//  VALIDATORS
 // ─────────────────────────────────────────────────────────────────────────────
 String? _validateName(String? v, String field) {
   if (v == null || v.trim().isEmpty) return '$field is required.';
-  final trimmed = v.trim();
-  if (trimmed.length < 2) return '$field must be at least 2 characters.';
-  if (trimmed.length > 50) return '$field must be 50 characters or less.';
-  if (!RegExp(r"^[a-zA-ZÀ-ÿ\s'\-]+$").hasMatch(trimmed)) {
+  final t = v.trim();
+  if (t.length < 2)  return '$field must be at least 2 characters.';
+  if (t.length > 50) return '$field must be 50 characters or less.';
+  if (!RegExp(r"^[a-zA-ZÀ-ÿ\s'\-]+$").hasMatch(t))
     return '$field may only contain letters, spaces, hyphens and apostrophes.';
-  }
   return null;
 }
 
-String _sanitizeName(String v) =>
-    v.trim().replaceAll(RegExp(r'\s+'), ' ');
+String? _validateStudentId(String? v) {
+  if (v == null || v.trim().isEmpty) return 'Student ID is required.';
+  final t = v.trim();
+  if (t.length < 5)  return 'Student ID must be at least 5 characters.';
+  if (t.length > 20) return 'Student ID must be 20 characters or less.';
+  if (!RegExp(r'^[a-zA-Z0-9\-]+$').hasMatch(t))
+    return 'Student ID may only contain letters, numbers and hyphens.';
+  return null;
+}
+
+String _sanitizeName(String v) => v.trim().replaceAll(RegExp(r'\s+'), ' ');
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  DATE FORMATTER
@@ -133,25 +114,24 @@ Future<({Uint8List bytes, String mime, String ext})?> _pickImageWeb() {
   input.onChange.listen((html.Event _) async {
     final file = input.files?.first;
     if (file == null) { completer.complete(null); return; }
-
-    final ext = file.name.split('.').last.toLowerCase();
-    final mime = ext == 'png' ? 'image/png'
+    final ext  = file.name.split('.').last.toLowerCase();
+    final mime = ext == 'png'  ? 'image/png'
                : ext == 'webp' ? 'image/webp'
                : 'image/jpeg';
-
-    if (!['jpg', 'jpeg', 'png', 'webp'].contains(ext)) {
+    if (!['jpg','jpeg','png','webp'].contains(ext)) {
       completer.complete(null); return;
     }
     if (file.size > 2 * 1024 * 1024) {
-      completer.completeError('size');
-      return;
+      completer.completeError('size'); return;
     }
-
     final reader = html.FileReader();
     reader.readAsArrayBuffer(file);
     await reader.onLoad.first;
-    final result = reader.result as Uint8List;
-    completer.complete((bytes: result, mime: mime, ext: ext));
+    completer.complete((
+      bytes: reader.result as Uint8List,
+      mime:  mime,
+      ext:   ext,
+    ));
   });
 
   input.onAbort.listen((_) => completer.complete(null));
@@ -169,7 +149,7 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
-  // ── Data ─────────────────────────────────────────────────────────────────
+  // ── Data ──────────────────────────────────────────────────────────────────
   Map<String, dynamic>?      _profileData;
   List<BadgeModel>           _earnedBadges    = [];
   List<Map<String, dynamic>> _certificates    = [];
@@ -182,12 +162,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String? _avatarUrl;
   int     _avatarCacheBust = 0;
 
-  // ── Edit state ────────────────────────────────────────────────────────────
+  // ── Edit controllers ───────────────────────────────────────────────────────
   final _firstNameCtrl = TextEditingController();
   final _lastNameCtrl  = TextEditingController();
+  final _studentIdCtrl = TextEditingController();
+
+  // ── Field errors ───────────────────────────────────────────────────────────
   String? _firstNameError;
   String? _lastNameError;
+  String? _studentIdError;
+  String? _deptError;
+  String? _courseError;
 
+  // ── Role / academic state ──────────────────────────────────────────────────
   String? _selectedRole;
   String? _selectedDept;
   String? _selectedCourse;
@@ -200,19 +187,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void dispose() {
     _firstNameCtrl.dispose();
     _lastNameCtrl.dispose();
+    _studentIdCtrl.dispose();
     super.dispose();
   }
 
-  // ── Derived helpers ───────────────────────────────────────────────────────
+  // ── Derived helpers ────────────────────────────────────────────────────────
   String get _displayName =>
       (_profileData?['full_name'] as String? ?? '').trim();
 
   String get _initials {
     if (_displayName.isEmpty) return '•';
-    final parts = _displayName.split(' ').where((p) => p.isNotEmpty).toList();
-    if (parts.length >= 2) {
+    final parts = _displayName.split(' ')
+        .where((p) => p.isNotEmpty).toList();
+    if (parts.length >= 2)
       return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
-    }
     return _displayName[0].toUpperCase();
   }
 
@@ -224,11 +212,29 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String get _joinedDate =>
       _fmtDate(_profileData?['created_at'] as String?);
 
-  bool get _isStudent       => _selectedRole == 'student';
+  bool get _isStudent        => _selectedRole == 'student';
   bool get _isTeacherFaculty =>
       _selectedRole == 'teacher' || _selectedRole == 'faculty';
+  bool get _requiresDept     => _isStudent || _isTeacherFaculty;
 
-  // ── Load ──────────────────────────────────────────────────────────────────
+  // Returns true if any field differs from what's saved in the DB
+  bool get _isDirty {
+    final fullName   = _profileData?['full_name'] as String? ?? '';
+    final parts      = fullName.trim().split(' ')
+        .where((p) => p.isNotEmpty).toList();
+    final savedFirst = parts.isNotEmpty ? parts.first : '';
+    final savedLast  = parts.length > 1 ? parts.sublist(1).join(' ') : '';
+
+    return _firstNameCtrl.text.trim() != savedFirst ||
+        _lastNameCtrl.text.trim()  != savedLast  ||
+        _studentIdCtrl.text.trim() !=
+            (_profileData?['student_id'] as String? ?? '') ||
+        _selectedRole   != (_profileData?['role']       as String?) ||
+        _selectedDept   != (_profileData?['department'] as String?) ||
+        _selectedCourse != (_profileData?['course']     as String?);
+  }
+
+  // ── Load ───────────────────────────────────────────────────────────────────
   Future<void> _load() async {
     if (!mounted) return;
     setState(() => _loading = true);
@@ -266,7 +272,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
       }).toList();
 
       final fullName  = profile?['full_name'] as String? ?? '';
-      final parts     = fullName.trim().split(' ').where((p) => p.isNotEmpty).toList();
+      final parts     = fullName.trim().split(' ')
+          .where((p) => p.isNotEmpty).toList();
       final firstName = parts.isNotEmpty ? parts.first : '';
       final lastName  = parts.length > 1 ? parts.sublist(1).join(' ') : '';
 
@@ -285,18 +292,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _certificates     = certs;
           _completedModules = progress.length;
           _avatarUrl        = profile?['avatar_url'] as String?;
+
           _firstNameCtrl.text = firstName;
           _lastNameCtrl.text  = lastName;
-          _selectedRole   = profile?['role'] as String?;
-          _selectedDept   = (savedDept != null &&
+          _studentIdCtrl.text = profile?['student_id'] as String? ?? '';
+
+          _selectedRole = profile?['role'] as String?;
+          _selectedDept = (savedDept != null &&
               kCvsuDeptCourses.containsKey(savedDept)) ? savedDept : null;
           _selectedCourse = (_selectedDept != null &&
               savedCourse != null &&
               kCvsuDeptCourses[_selectedDept]!.contains(savedCourse))
               ? savedCourse : null;
-          _selectedYear   = kYearLevels.contains(savedYear)
+          _selectedYear = kYearLevels.contains(savedYear)
               ? savedYear : '1st Year';
-          _loading        = false;
+          _loading = false;
         });
       }
     } catch (_) {
@@ -304,7 +314,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
-  // ── Avatar upload (web-safe) ──────────────────────────────────────────────
+  // ── Avatar upload ──────────────────────────────────────────────────────────
   Future<void> _pickAndUploadAvatar() async {
     if (_uploadingAvatar) return;
 
@@ -316,22 +326,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
       try {
         final result = await _pickImageWeb();
         if (result == null) return;
-        bytes = result.bytes;
-        mime  = result.mime;
-        ext   = result.ext;
+        bytes = result.bytes; mime = result.mime; ext = result.ext;
       } catch (e) {
-        if (e == 'size' && mounted) {
+        if (e == 'size' && mounted)
           _showError('Image must be smaller than 2 MB.');
-        }
         return;
       }
     } else {
       try {
         final picker = await _getMobilePicker();
         if (picker == null) return;
-        bytes = picker.bytes;
-        mime  = picker.mime;
-        ext   = picker.ext;
+        bytes = picker.bytes; mime = picker.mime; ext = picker.ext;
       } catch (_) {
         _showError('Failed to pick image. Please try again.');
         return;
@@ -340,32 +345,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     if (bytes == null) return;
     if (bytes.lengthInBytes > 2 * 1024 * 1024) {
-      _showError('Image must be smaller than 2 MB.');
-      return;
+      _showError('Image must be smaller than 2 MB.'); return;
     }
 
     setState(() => _uploadingAvatar = true);
     try {
       final userId = _supabase.auth.currentUser?.id;
       if (userId == null) return;
-
       final storagePath = 'avatars/$userId.$ext';
-
       await _supabase.storage.from('avatars').uploadBinary(
-        storagePath,
-        bytes,
+        storagePath, bytes,
         fileOptions: FileOptions(contentType: mime, upsert: true),
       );
-
       final publicUrl = _supabase.storage
-          .from('avatars')
-          .getPublicUrl(storagePath);
-
+          .from('avatars').getPublicUrl(storagePath);
       await _supabase.from('profiles').update({
         'avatar_url': publicUrl,
         'updated_at': DateTime.now().toUtc().toIso8601String(),
       }).eq('id', userId);
-
       if (mounted) {
         setState(() {
           _avatarUrl       = publicUrl;
@@ -380,36 +377,36 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
-  Future<({Uint8List bytes, String mime, String ext})?> _getMobilePicker() async {
+  Future<({Uint8List bytes, String mime, String ext})?> _getMobilePicker()
+      async {
     try {
       final dynamic picker = _ImagePickerMobile();
       return await picker.pick();
     } catch (_) { return null; }
   }
 
-  // ── Role change ───────────────────────────────────────────────────────────
+  // ── Role change ────────────────────────────────────────────────────────────
   Future<void> _onRoleTap(String newRole) async {
     if (newRole == _selectedRole) return;
 
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16)),
         title: Text('Change Role?',
             style: GoogleFonts.poppins(
                 fontWeight: FontWeight.w700, color: AppColors.textDark)),
         content: Text(
           'Changing to "${newRole[0].toUpperCase()}${newRole.substring(1)}" '
-          'will update your profile fields and affect seminar registration records. Continue?',
+          'will update your profile fields. Continue?',
           style: GoogleFonts.poppins(
-              fontSize: 13, color: AppColors.textMid, height: 1.5),
-        ),
+              fontSize: 13, color: AppColors.textMid, height: 1.5)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
             child: Text('Cancel',
-                style: GoogleFonts.poppins(color: AppColors.textMid)),
-          ),
+                style: GoogleFonts.poppins(color: AppColors.textMid))),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: ElevatedButton.styleFrom(
@@ -420,62 +417,173 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
             child: Text('Change Role',
                 style: GoogleFonts.poppins(
-                    color: Colors.white, fontWeight: FontWeight.w600)),
-          ),
+                    color: Colors.white, fontWeight: FontWeight.w600))),
         ],
       ),
     );
 
     if (confirmed == true && mounted) {
       setState(() {
-        _selectedRole = newRole;
-        // Student → other: clear course + year, keep dept for teacher/faculty
+        _selectedRole   = newRole;
+        _deptError      = null;
+        _courseError    = null;
+        _studentIdError = null;
         if (newRole != 'student') {
           _selectedCourse = null;
           _selectedYear   = '1st Year';
-          // Guest/Speaker: also clear department
-          if (newRole != 'teacher' && newRole != 'faculty') {
-            _selectedDept = null;
-          }
+          _studentIdCtrl.clear();
+        }
+        if (newRole != 'teacher' && newRole != 'faculty' &&
+            newRole != 'student') {
+          _selectedDept = null;
         }
       });
     }
   }
 
-  // ── Save profile ──────────────────────────────────────────────────────────
-  Future<void> _saveProfile() async {
-    final fnErr = _validateName(_firstNameCtrl.text, 'First name');
-    final lnErr = _validateName(_lastNameCtrl.text, 'Last name');
-    setState(() { _firstNameError = fnErr; _lastNameError = lnErr; });
-    if (fnErr != null || lnErr != null) return;
+  // ── Validate all fields for current role ───────────────────────────────────
+  bool _validateAll() {
+    final fnErr  = _validateName(_firstNameCtrl.text, 'First name');
+    final lnErr  = _validateName(_lastNameCtrl.text,  'Last name');
 
-    // Role-based validation
-    if ((_isStudent || _isTeacherFaculty) && _selectedDept == null) {
-      _showError('Please select a department.');
+    String? sidErr;
+    String? deptErr;
+    String? courseErr;
+
+    if (_isStudent) {
+      sidErr    = _validateStudentId(_studentIdCtrl.text);
+      deptErr   = _selectedDept   == null ? 'Department is required.' : null;
+      courseErr = _selectedCourse == null ? 'Course is required.'     : null;
+    } else if (_isTeacherFaculty) {
+      deptErr   = _selectedDept   == null ? 'Department is required.' : null;
+    }
+
+    setState(() {
+      _firstNameError = fnErr;
+      _lastNameError  = lnErr;
+      _studentIdError = sidErr;
+      _deptError      = deptErr;
+      _courseError    = courseErr;
+    });
+
+    return fnErr     == null &&
+           lnErr     == null &&
+           sidErr    == null &&
+           deptErr   == null &&
+           courseErr == null;
+  }
+
+  // ── Handle back from edit screen ───────────────────────────────────────────
+  Future<void> _handleEditBack() async {
+    // Step 1: Block back if required fields are missing
+    if (_isStudent) {
+      final fnErr     = _validateName(_firstNameCtrl.text, 'First name');
+      final lnErr     = _validateName(_lastNameCtrl.text,  'Last name');
+      final sidErr    = _validateStudentId(_studentIdCtrl.text);
+      final deptErr   = _selectedDept   == null ? 'Department is required.' : null;
+      final courseErr = _selectedCourse == null ? 'Course is required.'     : null;
+      final hasErrors = fnErr != null || lnErr != null || sidErr != null ||
+                        deptErr != null || courseErr != null;
+      if (hasErrors) {
+        setState(() {
+          _firstNameError = fnErr;
+          _lastNameError  = lnErr;
+          _studentIdError = sidErr;
+          _deptError      = deptErr;
+          _courseError    = courseErr;
+        });
+        _showError('Please complete all required fields before leaving.');
+        return;
+      }
+    }
+
+    if (_isTeacherFaculty) {
+      final fnErr   = _validateName(_firstNameCtrl.text, 'First name');
+      final lnErr   = _validateName(_lastNameCtrl.text,  'Last name');
+      final deptErr = _selectedDept == null ? 'Department is required.' : null;
+      final hasErrors = fnErr != null || lnErr != null || deptErr != null;
+      if (hasErrors) {
+        setState(() {
+          _firstNameError = fnErr;
+          _lastNameError  = lnErr;
+          _deptError      = deptErr;
+        });
+        _showError('Please complete all required fields before leaving.');
+        return;
+      }
+    }
+
+    // Step 2: No required errors — check for unsaved changes
+    if (!_isDirty) {
+      setState(() => _editOpen = false);
       return;
     }
-    if (_isStudent && _selectedCourse == null) {
-      _showError('Please select a course.');
-      return;
+
+    // Step 3: Has unsaved changes — confirm discard
+    final action = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16)),
+        title: Text('Unsaved Changes',
+            style: GoogleFonts.poppins(
+                fontWeight: FontWeight.w700, color: AppColors.textDark)),
+        content: Text(
+          'You have unsaved changes. What would you like to do?',
+          style: GoogleFonts.poppins(
+              fontSize: 13, color: AppColors.textMid, height: 1.5)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'keep'),
+            child: Text('Keep Editing',
+                style: GoogleFonts.poppins(
+                    color: AppColors.primary,
+                    fontWeight: FontWeight.w600))),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, 'discard'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.danger,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10)),
+              elevation: 0,
+            ),
+            child: Text('Discard Changes',
+                style: GoogleFonts.poppins(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600))),
+        ],
+      ),
+    );
+
+    if (action == 'discard' && mounted) {
+      await _load();
+      setState(() => _editOpen = false);
     }
+    // 'keep' → do nothing, stay on edit screen
+  }
+
+  // ── Save profile ───────────────────────────────────────────────────────────
+  Future<void> _saveProfile() async {
+    if (!_validateAll()) return;
 
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16)),
         title: Text('Save Changes?',
             style: GoogleFonts.poppins(
                 fontWeight: FontWeight.w700, color: AppColors.textDark)),
         content: Text(
           'Are you sure you want to save your profile changes?',
-          style: GoogleFonts.poppins(fontSize: 13, color: AppColors.textMid),
-        ),
+          style: GoogleFonts.poppins(
+              fontSize: 13, color: AppColors.textMid)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
             child: Text('Cancel',
-                style: GoogleFonts.poppins(color: AppColors.textMid)),
-          ),
+                style: GoogleFonts.poppins(color: AppColors.textMid))),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: ElevatedButton.styleFrom(
@@ -486,8 +594,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
             child: Text('Save',
                 style: GoogleFonts.poppins(
-                    color: Colors.white, fontWeight: FontWeight.w600)),
-          ),
+                    color: Colors.white, fontWeight: FontWeight.w600))),
         ],
       ),
     );
@@ -501,11 +608,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
       final firstName = _sanitizeName(_firstNameCtrl.text);
       final lastName  = _sanitizeName(_lastNameCtrl.text);
       final fullName  = '$firstName $lastName';
-
-      final rawIndex = kYearLevels.indexOf(_selectedYear);
+      final rawIndex  = kYearLevels.indexOf(_selectedYear);
       final yearIndex = rawIndex >= 0 ? rawIndex + 1 : null;
 
-      // Build payload based on role
       final Map<String, dynamic> payload = {
         'full_name':  fullName,
         'role':       _selectedRole,
@@ -513,15 +618,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
       };
 
       if (_isStudent) {
+        payload['student_id'] = _studentIdCtrl.text.trim();
         payload['department'] = _selectedDept;
         payload['course']     = _selectedCourse;
         payload['year_level'] = yearIndex;
       } else if (_isTeacherFaculty) {
+        payload['student_id'] = null;
         payload['department'] = _selectedDept;
         payload['course']     = null;
         payload['year_level'] = null;
       } else {
-        // guest / speaker
+        payload['student_id'] = null;
         payload['department'] = null;
         payload['course']     = null;
         payload['year_level'] = null;
@@ -543,25 +650,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
-  // ── Sign out ──────────────────────────────────────────────────────────────
+  // ── Sign out ───────────────────────────────────────────────────────────────
   Future<void> _handleSignOut() async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16)),
         title: Text('Sign Out',
             style: GoogleFonts.poppins(
                 fontWeight: FontWeight.w700, color: AppColors.textDark)),
         content: Text(
           'Are you sure you want to sign out of BLOOM GADRC?',
-          style: GoogleFonts.poppins(fontSize: 13, color: AppColors.textMid),
-        ),
+          style: GoogleFonts.poppins(
+              fontSize: 13, color: AppColors.textMid)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
             child: Text('Cancel',
-                style: GoogleFonts.poppins(color: AppColors.textMid)),
-          ),
+                style: GoogleFonts.poppins(color: AppColors.textMid))),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: ElevatedButton.styleFrom(
@@ -572,8 +679,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
             child: Text('Sign Out',
                 style: GoogleFonts.poppins(
-                    color: Colors.white, fontWeight: FontWeight.w600)),
-          ),
+                    color: Colors.white, fontWeight: FontWeight.w600))),
         ],
       ),
     );
@@ -587,7 +693,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
-  // ── Snackbars ─────────────────────────────────────────────────────────────
+  // ── Snackbars ──────────────────────────────────────────────────────────────
   void _showError(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -604,7 +710,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     ));
   }
 
-  // ── Badge detail sheet ────────────────────────────────────────────────────
+  // ── Badge detail sheet ─────────────────────────────────────────────────────
   void _openBadgeDetail(Map<String, dynamic> rawBadge) {
     final badge   = rawBadge['badges'] as Map<String, dynamic>? ?? {};
     final name    = badge['name']        as String? ?? 'Badge';
@@ -670,7 +776,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  // ── Avatar widgets ────────────────────────────────────────────────────────
+  // ── Avatar widgets ─────────────────────────────────────────────────────────
   Widget _buildAvatarView(double size) {
     final url = _avatarUrl;
     Widget inner = (url != null && url.isNotEmpty)
@@ -679,7 +785,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
             errorBuilder: (_, __, ___) =>
                 _initialsCircle(size, forHeader: true))
         : _initialsCircle(size, forHeader: true);
-    return ClipOval(child: SizedBox(width: size, height: size, child: inner));
+    return ClipOval(
+        child: SizedBox(width: size, height: size, child: inner));
   }
 
   Widget _buildAvatarEdit() {
@@ -736,7 +843,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 fontWeight: FontWeight.w900))),
       );
 
-  // ── BUILD ─────────────────────────────────────────────────────────────────
+  // ── BUILD ──────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     if (_editOpen) return _buildEditProfile();
@@ -747,7 +854,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         physics: const AlwaysScrollableScrollPhysics(),
         child: Column(children: [
 
-          // Header
+          // ── Header ──────────────────────────────────────────────────
           ClipPath(
             clipper: _OvalBottomClipper(),
             child: Container(
@@ -774,7 +881,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   Positioned(
                     bottom: 0, right: 0,
                     child: GestureDetector(
-                      onTap: _uploadingAvatar ? null : _pickAndUploadAvatar,
+                      onTap: _uploadingAvatar
+                          ? null : _pickAndUploadAvatar,
                       child: Container(
                         width: 28, height: 28,
                         decoration: BoxDecoration(
@@ -812,7 +920,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   alignment: WrapAlignment.center,
                   spacing: 8, runSpacing: 6,
                   children: [
-                    if ((_profileData?['department'] as String? ?? '').isNotEmpty)
+                    if ((_profileData?['department'] as String? ?? '')
+                        .isNotEmpty)
                       _InfoPill(
                           icon: Icons.school_outlined,
                           label: _profileData!['department'] as String),
@@ -836,17 +945,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
                     // Stats
                     AppCard(child: Row(children: [
-                      _StatItem(value: '${_earnedBadges.length}',
+                      _StatItem(
+                          value: '${_earnedBadges.length}',
                           label: 'Badges',
                           icon: Icons.emoji_events_rounded,
                           color: const Color(0xFFF59E0B)),
                       _vDivider(),
-                      _StatItem(value: '${_certificates.length}',
+                      _StatItem(
+                          value: '${_certificates.length}',
                           label: 'Certificates',
                           icon: Icons.workspace_premium_outlined,
                           color: AppColors.primary),
                       _vDivider(),
-                      _StatItem(value: '$_completedModules',
+                      _StatItem(
+                          value: '$_completedModules',
                           label: 'Modules',
                           icon: Icons.check_circle_outline,
                           color: AppColors.info),
@@ -916,8 +1028,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 color: AppColors.danger, width: 1.5),
                             shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(14)),
-                            padding:
-                                const EdgeInsets.symmetric(vertical: 12),
+                            padding: const EdgeInsets.symmetric(
+                                vertical: 12),
                           ),
                         ),
                       ),
@@ -931,245 +1043,289 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  // ── EDIT PROFILE ──────────────────────────────────────────────────────────
+  // ── EDIT PROFILE ───────────────────────────────────────────────────────────
   Widget _buildEditProfile() {
-    // Recompute course list reactively
     final deptCourseList = _selectedDept != null
         ? kCvsuDeptCourses[_selectedDept] ?? <String>[]
         : <String>[];
 
-    final bool showDept       = _isStudent || _isTeacherFaculty;
+    final bool showDept       = _requiresDept;
     final bool showCourseYear = _isStudent;
+    final bool showStudentId  = _isStudent;
 
-    return Column(children: [
-      Container(
-        color: Colors.white,
-        padding: EdgeInsets.fromLTRB(
-            8, MediaQuery.of(context).padding.top + 8, 16, 12),
-        child: Row(children: [
-          IconButton(
-            onPressed: () => setState(() => _editOpen = false),
-            icon: const Icon(Icons.chevron_left_rounded,
-                color: AppColors.textMid, size: 28),
-          ),
-          Text('Edit Profile',
-              style: GoogleFonts.poppins(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.textDark)),
-        ]),
-      ),
-      const Divider(height: 1, color: AppColors.border),
+    return PopScope(
+      canPop: false,
+      onPopInvoked: (_) => _handleEditBack(),
+      child: Column(children: [
 
-      Expanded(
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
+        // ── Top bar ────────────────────────────────────────────────────
+        Container(
+          color: Colors.white,
+          padding: EdgeInsets.fromLTRB(
+              8, MediaQuery.of(context).padding.top + 8, 16, 12),
+          child: Row(children: [
+            IconButton(
+              onPressed: _handleEditBack,
+              icon: const Icon(Icons.chevron_left_rounded,
+                  color: AppColors.textMid, size: 28)),
+            Text('Edit Profile',
+                style: GoogleFonts.poppins(
+                    fontSize: 18, fontWeight: FontWeight.w700,
+                    color: AppColors.textDark)),
+          ]),
+        ),
+        const Divider(height: 1, color: AppColors.border),
 
-            // ── Avatar ────────────────────────────────────────────────
-            Center(child: Column(children: [
-              _buildAvatarEdit(),
-              const SizedBox(height: 8),
-              Text('Tap camera to change photo',
-                  style: GoogleFonts.poppins(
-                      fontSize: 12, color: AppColors.textLight)),
-            ])),
-            const SizedBox(height: 20),
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
 
-            // ── Name ──────────────────────────────────────────────────
-            AppCard(child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _sectionLabel('Personal Information'),
-                const SizedBox(height: 14),
-                Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Expanded(child: _ValidatedField(
-                    label: 'First Name',
-                    controller: _firstNameCtrl,
-                    icon: Icons.person_outline_rounded,
-                    error: _firstNameError,
-                    onChanged: (_) => setState(() =>
-                        _firstNameError = _validateName(
-                            _firstNameCtrl.text, 'First name')),
-                  )),
-                  const SizedBox(width: 12),
-                  Expanded(child: _ValidatedField(
-                    label: 'Last Name',
-                    controller: _lastNameCtrl,
-                    icon: Icons.person_outline_rounded,
-                    error: _lastNameError,
-                    onChanged: (_) => setState(() =>
-                        _lastNameError = _validateName(
-                            _lastNameCtrl.text, 'Last name')),
-                  )),
-                ]),
-              ],
-            )),
-            const SizedBox(height: 12),
-
-            // ── Role ──────────────────────────────────────────────────
-            AppCard(child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _sectionLabel('Role'),
-                const SizedBox(height: 4),
-                Text('Tap to change — affects seminar records.',
+              // ── Avatar ──────────────────────────────────────────────
+              Center(child: Column(children: [
+                _buildAvatarEdit(),
+                const SizedBox(height: 8),
+                Text('Tap camera to change photo',
                     style: GoogleFonts.poppins(
-                        fontSize: 11, color: AppColors.textLight)),
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 8, runSpacing: 8,
-                  children: ['student','teacher','faculty','speaker','guest']
-                      .map((r) {
-                    final sel = _selectedRole == r;
-                    return GestureDetector(
-                      onTap: () => _onRoleTap(r),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 9),
-                        decoration: BoxDecoration(
-                          color: sel
-                              ? AppColors.primaryDark
-                              : AppColors.background,
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(
-                            color: sel
-                                ? AppColors.primaryDark
-                                : AppColors.border,
-                            width: 1.5,
-                          ),
-                        ),
-                        child: Text(
-                          r[0].toUpperCase() + r.substring(1),
-                          style: GoogleFonts.poppins(
-                              fontWeight: FontWeight.w600,
-                              fontSize: 13,
-                              color: sel
-                                  ? Colors.white
-                                  : AppColors.textMid),
-                        ),
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ],
-            )),
-            const SizedBox(height: 12),
+                        fontSize: 12, color: AppColors.textLight)),
+              ])),
+              const SizedBox(height: 20),
 
-            // ── Academic fields (role-based) ───────────────────────────
-            if (showDept) ...[
+              // ── Personal information ────────────────────────────────
               AppCard(child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _sectionLabel('Academic Details'),
+                  _sectionLabel('Personal Information'),
                   const SizedBox(height: 14),
+                  Row(crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                    Expanded(child: _ValidatedField(
+                      label: 'First Name *',
+                      controller: _firstNameCtrl,
+                      icon: Icons.person_outline_rounded,
+                      error: _firstNameError,
+                      onChanged: (_) => setState(() =>
+                          _firstNameError = _validateName(
+                              _firstNameCtrl.text, 'First name')),
+                    )),
+                    const SizedBox(width: 12),
+                    Expanded(child: _ValidatedField(
+                      label: 'Last Name *',
+                      controller: _lastNameCtrl,
+                      icon: Icons.person_outline_rounded,
+                      error: _lastNameError,
+                      onChanged: (_) => setState(() =>
+                          _lastNameError = _validateName(
+                              _lastNameCtrl.text, 'Last name')),
+                    )),
+                  ]),
 
-                  // Department — student + teacher + faculty
-                  _DropdownField<String>(
-                    label: 'Department / College',
-                    icon: Icons.account_balance_outlined,
-                    value: _selectedDept,
-                    items: kCvsuDeptCourses.keys.toList(),
-                    itemLabel: (d) => d,
-                    onChanged: (d) => setState(() {
-                      _selectedDept   = d;
-                      _selectedCourse = null; // reset course on dept change
-                    }),
-                  ),
-
-                  // Course + Year — student only
-                  if (showCourseYear) ...[
+                  if (showStudentId) ...[
                     const SizedBox(height: 12),
-                    _DropdownField<String>(
-                      label: 'Course / Program',
-                      icon: Icons.school_outlined,
-                      value: _selectedCourse,
-                      items: deptCourseList,
-                      itemLabel: (c) => c,
-                      onChanged: _selectedDept == null
-                          ? null
-                          : (c) => setState(() => _selectedCourse = c),
-                      hint: _selectedDept == null
-                          ? 'Select department first'
-                          : 'Select course',
-                    ),
-                    const SizedBox(height: 12),
-                    _DropdownField<String>(
-                      label: 'Year Level',
-                      icon: Icons.calendar_today_outlined,
-                      value: _selectedYear,
-                      items: kYearLevels,
-                      itemLabel: (y) => y,
-                      onChanged: (y) =>
-                          setState(() => _selectedYear = y ?? '1st Year'),
+                    _ValidatedField(
+                      label: 'Student ID *',
+                      controller: _studentIdCtrl,
+                      icon: Icons.badge_outlined,
+                      error: _studentIdError,
+                      keyboardType: TextInputType.text,
+                      onChanged: (_) => setState(() =>
+                          _studentIdError =
+                              _validateStudentId(_studentIdCtrl.text)),
                     ),
                   ],
                 ],
               )),
               const SizedBox(height: 12),
-            ],
 
-            // ── Save button ────────────────────────────────────────────
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: _saving ? null : _saveProfile,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primaryDark,
-                  disabledBackgroundColor:
-                      AppColors.primaryDark.withOpacity(0.4),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14)),
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  elevation: 0,
+              // ── Role ────────────────────────────────────────────────
+              AppCard(child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _sectionLabel('Role'),
+                  const SizedBox(height: 4),
+                  Text('Tap to change — affects required fields.',
+                      style: GoogleFonts.poppins(
+                          fontSize: 11, color: AppColors.textLight)),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8, runSpacing: 8,
+                    children: [
+                      'student','teacher','faculty','speaker','guest',
+                    ].map((r) {
+                      final sel = _selectedRole == r;
+                      return GestureDetector(
+                        onTap: () => _onRoleTap(r),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 9),
+                          decoration: BoxDecoration(
+                            color: sel
+                                ? AppColors.primaryDark
+                                : AppColors.background,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: sel
+                                  ? AppColors.primaryDark
+                                  : AppColors.border,
+                              width: 1.5,
+                            ),
+                          ),
+                          child: Text(
+                            r[0].toUpperCase() + r.substring(1),
+                            style: GoogleFonts.poppins(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 13,
+                                color: sel
+                                    ? Colors.white
+                                    : AppColors.textMid),
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                  if (_isStudent) ...[
+                    const SizedBox(height: 10),
+                    _RequiredFieldsHint(
+                        text: 'Student role requires: Student ID, '
+                            'Department, Course & Year Level'),
+                  ] else if (_isTeacherFaculty) ...[
+                    const SizedBox(height: 10),
+                    _RequiredFieldsHint(
+                        text: 'Teacher/Faculty role requires: Department'),
+                  ],
+                ],
+              )),
+              const SizedBox(height: 12),
+
+              // ── Academic details ────────────────────────────────────
+              if (showDept) ...[
+                AppCard(child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _sectionLabel('Academic Details'),
+                    const SizedBox(height: 14),
+
+                    _DropdownField<String>(
+                      label: 'Department / College *',
+                      icon: Icons.account_balance_outlined,
+                      value: _selectedDept,
+                      items: kCvsuDeptCourses.keys.toList(),
+                      itemLabel: (d) => d,
+                      error: _deptError,
+                      onChanged: (d) => setState(() {
+                        _selectedDept   = d;
+                        _selectedCourse = null;
+                        _deptError      = null;
+                      }),
+                    ),
+
+                    if (showCourseYear) ...[
+                      const SizedBox(height: 12),
+                      _DropdownField<String>(
+                        label: 'Course / Program *',
+                        icon: Icons.school_outlined,
+                        value: _selectedCourse,
+                        items: deptCourseList,
+                        itemLabel: (c) => c,
+                        error: _courseError,
+                        onChanged: _selectedDept == null
+                            ? null
+                            : (c) => setState(() {
+                                  _selectedCourse = c;
+                                  _courseError    = null;
+                                }),
+                        hint: _selectedDept == null
+                            ? 'Select department first'
+                            : 'Select course',
+                      ),
+                      const SizedBox(height: 12),
+                      _DropdownField<String>(
+                        label: 'Year Level *',
+                        icon: Icons.calendar_today_outlined,
+                        value: _selectedYear,
+                        items: kYearLevels,
+                        itemLabel: (y) => y,
+                        onChanged: (y) => setState(
+                            () => _selectedYear = y ?? '1st Year'),
+                      ),
+                    ],
+                  ],
+                )),
+                const SizedBox(height: 12),
+              ],
+
+              // ── Save button ─────────────────────────────────────────
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: _saving ? null : _saveProfile,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primaryDark,
+                    disabledBackgroundColor:
+                        AppColors.primaryDark.withOpacity(0.4),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14)),
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    elevation: 0,
+                  ),
+                  child: _saving
+                      ? const SizedBox(width: 20, height: 20,
+                          child: CircularProgressIndicator(
+                              color: Colors.white, strokeWidth: 2))
+                      : Text('Save Changes',
+                          style: GoogleFonts.poppins(
+                              fontSize: 15, fontWeight: FontWeight.w600,
+                              color: Colors.white)),
                 ),
-                child: _saving
-                    ? const SizedBox(width: 20, height: 20,
-                        child: CircularProgressIndicator(
-                            color: Colors.white, strokeWidth: 2))
-                    : Text('Save Changes',
-                        style: GoogleFonts.poppins(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.white)),
               ),
-            ),
-            const SizedBox(height: 24),
-          ],
+              const SizedBox(height: 24),
+            ],
+          ),
         ),
-      ),
-    ]);
+      ]),
+    );
   }
 
   Widget _sectionLabel(String text) => Text(text,
       style: GoogleFonts.poppins(
-          fontSize: 12,
-          fontWeight: FontWeight.w600,
-          color: AppColors.textMid,
-          letterSpacing: 0.5));
+          fontSize: 12, fontWeight: FontWeight.w600,
+          color: AppColors.textMid, letterSpacing: 0.5));
 
   Widget _vDivider() =>
       Container(width: 1, height: 40, color: AppColors.border);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  REQUIRED FIELDS HINT
+// ─────────────────────────────────────────────────────────────────────────────
+class _RequiredFieldsHint extends StatelessWidget {
+  final String text;
+  const _RequiredFieldsHint({required this.text});
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(10),
+    decoration: BoxDecoration(
+      color: AppColors.primary.withOpacity(0.06),
+      borderRadius: BorderRadius.circular(8),
+    ),
+    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const Icon(Icons.info_outline_rounded,
+          color: AppColors.primary, size: 15),
+      const SizedBox(width: 8),
+      Expanded(child: Text(text,
+          style: GoogleFonts.poppins(
+              fontSize: 11, color: AppColors.primary, height: 1.4))),
+    ]),
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 //  MOBILE IMAGE PICKER STUB
 // ─────────────────────────────────────────────────────────────────────────────
 class _ImagePickerMobile {
-  Future<({Uint8List bytes, String mime, String ext})?> pick() async {
-    // Replace stub with real image_picker call for mobile:
-    // final picker = ImagePicker();
-    // final picked = await picker.pickImage(
-    //   source: ImageSource.gallery,
-    //   maxWidth: 512, maxHeight: 512, imageQuality: 85);
-    // if (picked == null) return null;
-    // final bytes = await picked.readAsBytes();
-    // final ext = picked.name.split('.').last.toLowerCase();
-    // final mime = ext == 'png' ? 'image/png'
-    //            : ext == 'webp' ? 'image/webp' : 'image/jpeg';
-    // return (bytes: bytes, mime: mime, ext: ext);
-    return null;
-  }
+  Future<({Uint8List bytes, String mime, String ext})?> pick() async =>
+      null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1207,12 +1363,15 @@ class _ValidatedField extends StatelessWidget {
   final IconData icon;
   final String? error;
   final ValueChanged<String>? onChanged;
+  final TextInputType? keyboardType;
+
   const _ValidatedField({
     required this.label,
     required this.controller,
     required this.icon,
     this.error,
     this.onChanged,
+    this.keyboardType,
   });
 
   @override
@@ -1221,22 +1380,23 @@ class _ValidatedField extends StatelessWidget {
     children: [
       Text(label,
           style: GoogleFonts.poppins(
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
+              fontSize: 12, fontWeight: FontWeight.w500,
               color: AppColors.textDark)),
       const SizedBox(height: 6),
       TextField(
-        controller: controller,
-        onChanged: onChanged,
-        style: GoogleFonts.poppins(fontSize: 14, color: AppColors.textDark),
+        controller:   controller,
+        onChanged:    onChanged,
+        keyboardType: keyboardType,
+        style: GoogleFonts.poppins(
+            fontSize: 14, color: AppColors.textDark),
         decoration: InputDecoration(
           prefixIcon: Icon(icon, color: AppColors.textLight, size: 18),
-          filled: true,
-          fillColor: AppColors.background,
+          filled:     true,
+          fillColor:  AppColors.background,
           contentPadding:
               const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          errorText: error,
-          errorStyle: GoogleFonts.poppins(fontSize: 11),
+          errorText:     error,
+          errorStyle:    GoogleFonts.poppins(fontSize: 11),
           errorMaxLines: 2,
           border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
@@ -1272,6 +1432,8 @@ class _DropdownField<T> extends StatelessWidget {
   final String Function(T) itemLabel;
   final ValueChanged<T?>? onChanged;
   final String? hint;
+  final String? error;
+
   const _DropdownField({
     required this.label,
     required this.icon,
@@ -1280,6 +1442,7 @@ class _DropdownField<T> extends StatelessWidget {
     required this.itemLabel,
     required this.onChanged,
     this.hint,
+    this.error,
   });
 
   @override
@@ -1288,8 +1451,7 @@ class _DropdownField<T> extends StatelessWidget {
     children: [
       Text(label,
           style: GoogleFonts.poppins(
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
+              fontSize: 12, fontWeight: FontWeight.w500,
               color: AppColors.textDark)),
       const SizedBox(height: 6),
       DropdownButtonFormField<T>(
@@ -1302,18 +1464,23 @@ class _DropdownField<T> extends StatelessWidget {
             fontSize: 13, color: AppColors.textDark),
         decoration: InputDecoration(
           prefixIcon: Icon(icon, color: AppColors.textLight, size: 18),
-          filled: true,
+          filled:    true,
           fillColor: onChanged == null
               ? AppColors.border.withOpacity(0.3)
               : AppColors.background,
           contentPadding:
               const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          errorText:    error,
+          errorStyle:   GoogleFonts.poppins(fontSize: 11),
           border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
               borderSide: const BorderSide(color: AppColors.border)),
           enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: AppColors.border)),
+              borderSide: BorderSide(
+                  color: error != null
+                      ? AppColors.danger
+                      : AppColors.border)),
           focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
               borderSide: const BorderSide(
@@ -1321,6 +1488,10 @@ class _DropdownField<T> extends StatelessWidget {
           disabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
               borderSide: const BorderSide(color: AppColors.border)),
+          focusedErrorBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(
+                  color: AppColors.danger, width: 1.5)),
         ),
         items: items.map((item) => DropdownMenuItem<T>(
           value: item,
@@ -1368,62 +1539,61 @@ class _HorizontalSection extends StatelessWidget {
   final Widget Function(int) itemBuilder;
 
   const _HorizontalSection({
-    required this.title,    required this.titleIcon,
-    required this.count,    required this.emptyIcon,
+    required this.title,     required this.titleIcon,
+    required this.count,     required this.emptyIcon,
     required this.emptyText, required this.itemCount,
     required this.itemBuilder,
   });
 
   @override
-  Widget build(BuildContext context) {
-    return AppCard(
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          Icon(titleIcon, size: 16, color: AppColors.textDark),
-          const SizedBox(width: 6),
-          Expanded(child: Text(title,
-              style: GoogleFonts.poppins(
-                  fontSize: 14, fontWeight: FontWeight.w600,
-                  color: AppColors.textDark))),
-          if (count > 0)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              decoration: BoxDecoration(
-                  color: AppColors.primary.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(10)),
-              child: Text('$count',
-                  style: GoogleFonts.poppins(
-                      fontSize: 11, fontWeight: FontWeight.w700,
-                      color: AppColors.primary)),
-            ),
-        ]),
-        const SizedBox(height: 12),
-        if (itemCount == 0)
-          Center(child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 16),
-            child: Column(children: [
-              Icon(emptyIcon, size: 32, color: AppColors.textLight),
-              const SizedBox(height: 8),
-              Text(emptyText,
-                  style: GoogleFonts.poppins(
-                      fontSize: 12, color: AppColors.textLight),
-                  textAlign: TextAlign.center),
-            ]),
-          ))
-        else
-          SizedBox(
-            height: 140,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.only(bottom: 4),
-              itemCount: itemCount,
-              separatorBuilder: (_, __) => const SizedBox(width: 10),
-              itemBuilder: (_, i) => itemBuilder(i),
-            ),
+  Widget build(BuildContext context) => AppCard(
+    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Row(children: [
+        Icon(titleIcon, size: 16, color: AppColors.textDark),
+        const SizedBox(width: 6),
+        Expanded(child: Text(title,
+            style: GoogleFonts.poppins(
+                fontSize: 14, fontWeight: FontWeight.w600,
+                color: AppColors.textDark))),
+        if (count > 0)
+          Container(
+            padding: const EdgeInsets.symmetric(
+                horizontal: 8, vertical: 2),
+            decoration: BoxDecoration(
+                color: AppColors.primary.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(10)),
+            child: Text('$count',
+                style: GoogleFonts.poppins(
+                    fontSize: 11, fontWeight: FontWeight.w700,
+                    color: AppColors.primary)),
           ),
       ]),
-    );
-  }
+      const SizedBox(height: 12),
+      if (itemCount == 0)
+        Center(child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          child: Column(children: [
+            Icon(emptyIcon, size: 32, color: AppColors.textLight),
+            const SizedBox(height: 8),
+            Text(emptyText,
+                style: GoogleFonts.poppins(
+                    fontSize: 12, color: AppColors.textLight),
+                textAlign: TextAlign.center),
+          ]),
+        ))
+      else
+        SizedBox(
+          height: 140,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.only(bottom: 4),
+            itemCount: itemCount,
+            separatorBuilder: (_, __) => const SizedBox(width: 10),
+            itemBuilder: (_, i) => itemBuilder(i),
+          ),
+        ),
+    ]),
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1443,42 +1613,40 @@ class _CertPreviewCard extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 110,
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFC8E6C9), width: 1.5),
-        boxShadow: [BoxShadow(
-            color: Colors.black.withOpacity(0.06),
-            blurRadius: 6, offset: const Offset(0, 2))],
+  Widget build(BuildContext context) => Container(
+    width: 110,
+    decoration: BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(color: const Color(0xFFC8E6C9), width: 1.5),
+      boxShadow: [BoxShadow(
+          color: Colors.black.withOpacity(0.06),
+          blurRadius: 6, offset: const Offset(0, 2))],
+    ),
+    padding: const EdgeInsets.all(10),
+    child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+      Container(
+        width: 52, height: 52,
+        decoration: BoxDecoration(
+            color: const Color(0xFFE8F5E9),
+            borderRadius: BorderRadius.circular(12)),
+        child: const Center(child: Icon(
+            Icons.workspace_premium_rounded,
+            size: 30, color: Color(0xFF2D6A2D))),
       ),
-      padding: const EdgeInsets.all(10),
-      child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-        Container(
-          width: 52, height: 52,
-          decoration: BoxDecoration(
-              color: const Color(0xFFE8F5E9),
-              borderRadius: BorderRadius.circular(12)),
-          child: const Center(child: Icon(
-              Icons.workspace_premium_rounded,
-              size: 30, color: Color(0xFF2D6A2D))),
-        ),
-        const SizedBox(height: 6),
-        Text(_title,
-            style: GoogleFonts.poppins(
-                fontSize: 11, fontWeight: FontWeight.w600,
-                color: const Color(0xFF1A2E1A)),
-            textAlign: TextAlign.center,
-            maxLines: 2, overflow: TextOverflow.ellipsis),
-        const SizedBox(height: 3),
-        Text(_fmtDate(cert['issued_at'] as String?),
-            style: GoogleFonts.poppins(fontSize: 9, color: Colors.grey),
-            textAlign: TextAlign.center),
-      ]),
-    );
-  }
+      const SizedBox(height: 6),
+      Text(_title,
+          style: GoogleFonts.poppins(
+              fontSize: 11, fontWeight: FontWeight.w600,
+              color: const Color(0xFF1A2E1A)),
+          textAlign: TextAlign.center,
+          maxLines: 2, overflow: TextOverflow.ellipsis),
+      const SizedBox(height: 3),
+      Text(_fmtDate(cert['issued_at'] as String?),
+          style: GoogleFonts.poppins(fontSize: 9, color: Colors.grey),
+          textAlign: TextAlign.center),
+    ]),
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1496,7 +1664,8 @@ class _BadgePreviewCard extends StatelessWidget {
     final iconUrl = badge['icon_url'] as String?;
     final awarded = _fmtDate(rawBadge['awarded_at'] as String?);
 
-    return GestureDetector(onTap: onTap,
+    return GestureDetector(
+      onTap: onTap,
       child: Container(
         width: 110,
         decoration: BoxDecoration(
@@ -1508,7 +1677,8 @@ class _BadgePreviewCard extends StatelessWidget {
               blurRadius: 6, offset: const Offset(0, 2))],
         ),
         padding: const EdgeInsets.all(10),
-        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+        child: Column(mainAxisAlignment: MainAxisAlignment.center,
+            children: [
           Container(
             width: 52, height: 52,
             decoration: BoxDecoration(

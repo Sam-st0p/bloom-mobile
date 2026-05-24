@@ -32,8 +32,10 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
   // Current question index
   int _currentQ = 0;
 
-  // Selected answers: questionId -> optionId
+  // Selected answers: questionId -> optionId (or text for short answer)
   final Map<String, String> _answers = {};
+  // Text controllers for short answer questions — persists text across navigation
+  final Map<String, TextEditingController> _textControllers = {};
 
   // Results
   double _score = 0;
@@ -45,6 +47,12 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
   void initState() {
     super.initState();
     _load();
+  }
+
+  @override
+  void dispose() {
+    for (final c in _textControllers.values) { c.dispose(); }
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -63,7 +71,7 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
         return;
       }
 
-      final assessment = assessments.first;
+      final assessment = assessments.first as Map<String, dynamic>;
 
       // Get questions with options
       final questions = await _supabase
@@ -87,7 +95,7 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
       if (mounted) {
         setState(() {
           _assessment = assessment;
-          _questions = List<Map<String, dynamic>>.from(questions as List);
+          _questions = _deepCastQuestions(questions as List);
           _previousAttempts = prevAttempts;
           _loading = false;
         });
@@ -95,6 +103,23 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
     } catch (e) {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+
+  // Deep-cast helper — fixes nested question_options not showing
+  List<Map<String, dynamic>> _deepCastQuestions(List raw) {
+    return raw.map((q) {
+      final qMap = Map<String, dynamic>.from(q as Map);
+      final opts = qMap['question_options'];
+      if (opts is List) {
+        qMap['question_options'] = opts
+            .map((o) => Map<String, dynamic>.from(o as Map))
+            .toList();
+      } else {
+        qMap['question_options'] = <Map<String, dynamic>>[];
+      }
+      return qMap;
+    }).toList();
   }
 
   Future<void> _submitAssessment() async {
@@ -109,15 +134,21 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
 
       for (final q in _questions) {
         final pts = (q['points'] as num?)?.toDouble() ?? 1.0;
+        final qType = (q['question_type'] ?? 'multiple_choice').toString().toLowerCase();
+        final isShortAnswer = qType == 'short_answer' || qType == 'essay';
+
+        // Short answer questions are manually graded — exclude from auto-score
+        if (isShortAnswer) continue;
+
         maxScore += pts;
         final selectedOptionId = _answers[q['id'].toString()];
         if (selectedOptionId != null) {
           final options = q['question_options'] as List? ?? [];
-          final selected = options.firstWhere(
-            (o) => o['id'].toString() == selectedOptionId,
-            orElse: () => {},
-          );
-          if (selected['is_correct'] == true) {
+final selected = options.firstWhere(
+  (o) => o['id'].toString() == selectedOptionId,
+  orElse: () => <String, dynamic>{},
+);
+if (selected['is_correct'] == true) {
             score += pts;
           }
         }
@@ -142,24 +173,38 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
       // Save individual answers
       for (final q in _questions) {
         final qId = q['id'].toString();
-        final selectedOptionId = _answers[qId];
-        if (selectedOptionId == null) continue;
+        final answer = _answers[qId];
+        if (answer == null) continue;
 
-        final options = q['question_options'] as List? ?? [];
-        final selected = options.firstWhere(
-          (o) => o['id'].toString() == selectedOptionId,
-          orElse: () => {},
-        );
-        final isCorrect = selected['is_correct'] == true;
-        final pts = (q['points'] as num?)?.toDouble() ?? 1.0;
+        final qType = (q['question_type'] ?? 'multiple_choice').toString().toLowerCase();
+        final isShortAnswer = qType == 'short_answer' || qType == 'essay';
 
-        await _supabase.from('assessment_answers').insert({
-          'attempt_id': attempt['id'],
-          'question_id': q['id'],
-          'selected_option_id': selectedOptionId,
-          'is_correct': isCorrect,
-          'points_earned': isCorrect ? pts : 0,
-        });
+        if (isShortAnswer) {
+          // Save short answer text — manually graded by admin
+          await _supabase.from('assessment_answers').insert({
+            'attempt_id': attempt['id'],
+            'question_id': q['id'],
+            'text_answer': answer,
+            'is_correct': null, // pending manual grading
+            'points_earned': 0,
+          });
+        } else {
+          final options = q['question_options'] as List? ?? [];
+          final selected = options.firstWhere(
+  (o) => o['id'].toString() == answer,
+  orElse: () => <String, dynamic>{},
+);
+final isCorrect = selected['is_correct'] == true;
+          final pts = (q['points'] as num?)?.toDouble() ?? 1.0;
+
+          await _supabase.from('assessment_answers').insert({
+            'attempt_id': attempt['id'],
+            'question_id': q['id'],
+            'selected_option_id': answer,
+            'is_correct': isCorrect,
+            'points_earned': isCorrect ? pts : 0,
+          });
+        }
       }
 
       // If passed, update module progress to 100%
@@ -185,9 +230,10 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
           _submitting = false;
         });
       }
-    } catch (e) {
-      if (mounted) setState(() => _submitting = false);
-    }
+} catch (e) {
+  debugPrint('❌ Submit error: $e');
+  if (mounted) setState(() => _submitting = false);
+}
   }
 
   Future<void> _checkAndAwardBadges(String userId) async {
@@ -238,9 +284,9 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return const Scaffold(
+      return Scaffold(
         backgroundColor: AppColors.background,
-        body: Center(child: CircularProgressIndicator(color: AppColors.primary)),
+        body: const Center(child: CircularProgressIndicator(color: AppColors.primary)),
       );
     }
 
@@ -255,7 +301,7 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Icon(Icons.assignment_outlined, size: 48, color: AppColors.textLight),
+                    const Icon(Icons.quiz_outlined, size: 48, color: AppColors.textLight),
                     const SizedBox(height: 12),
                     Text('No assessment available yet',
                         style: GoogleFonts.nunito(
@@ -361,6 +407,9 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
 
   Widget _buildQuestion() {
     final q = _questions[_currentQ];
+    final qType = (q['question_type'] ?? 'multiple_choice').toString().toLowerCase();
+    final isShortAnswer = qType == 'short_answer' || qType == 'essay';
+
     final options = List<Map<String, dynamic>>.from(q['question_options'] as List? ?? []);
     options.sort((a, b) => (a['sort_order'] as int? ?? 0).compareTo(b['sort_order'] as int? ?? 0));
 
@@ -372,16 +421,34 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const SizedBox(height: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            decoration: BoxDecoration(
-              color: AppColors.primary.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(8),
+          // Question type badge
+          Row(children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: AppColors.primary.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text('Question ${_currentQ + 1}',
+                  style: GoogleFonts.nunito(
+                      fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.primary)),
             ),
-            child: Text('Question ${_currentQ + 1}',
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: isShortAnswer
+                    ? Colors.orange.withOpacity(0.1)
+                    : Colors.blue.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                isShortAnswer ? 'Short Answer' : (qType == 'true_false' ? 'True / False' : 'Multiple Choice'),
                 style: GoogleFonts.nunito(
-                    fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.primary)),
-          ),
+                    fontSize: 11, fontWeight: FontWeight.w700,
+                    color: isShortAnswer ? Colors.orange.shade700 : Colors.blue.shade700)),
+            ),
+          ]),
           const SizedBox(height: 14),
           Text(q['question_text'] ?? '',
               style: GoogleFonts.nunito(
@@ -391,59 +458,178 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
           Text('${(q['points'] as num?) ?? 1} point${((q['points'] as num?) ?? 1) == 1 ? '' : 's'}',
               style: GoogleFonts.nunito(fontSize: 12, color: AppColors.textLight)),
           const SizedBox(height: 20),
-          ...options.map((opt) {
-            final optId = opt['id'].toString();
-            final selected = selectedOptionId == optId;
-            return GestureDetector(
-              onTap: () => setState(() => _answers[q['id'].toString()] = optId),
-              child: Container(
-                margin: const EdgeInsets.only(bottom: 12),
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: selected ? AppColors.primary.withOpacity(0.08) : Colors.white,
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(
-                    color: selected ? AppColors.primary : AppColors.border,
-                    width: selected ? 2 : 1.5,
+
+          // ── Short answer ──────────────────────────────────────────
+          if (isShortAnswer) ...[
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: Colors.orange.withOpacity(0.06),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.orange.withOpacity(0.3))),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.edit_note_rounded, color: Colors.orange.shade600, size: 20),
+                  const SizedBox(width: 10),
+                  Expanded(child: Text(
+                    'Type your answer in the text box below. Your response will be reviewed and graded by the instructor.',
+                    style: GoogleFonts.nunito(
+                        fontSize: 12, color: Colors.orange.shade700, height: 1.5))),
+                ]),
+            ),
+            const SizedBox(height: 16),
+            Builder(builder: (context) {
+              final qId = q['id'].toString();
+              // Get or create a persistent controller for this question
+              final ctrl = _textControllers.putIfAbsent(
+                qId,
+                () => TextEditingController(text: _answers[qId] ?? ''),
+              );
+              return TextField(
+                controller: ctrl,
+                maxLines: 5,
+                onChanged: (v) {
+                  if (v.trim().isNotEmpty) {
+                    _answers[qId] = v.trim();
+                  } else {
+                    _answers.remove(qId);
+                  }
+                },
+                style: GoogleFonts.nunito(fontSize: 14, color: AppColors.textDark),
+                decoration: InputDecoration(
+                  hintText: 'Write your answer here...',
+                  hintStyle: GoogleFonts.nunito(color: AppColors.textLight, fontSize: 13),
+                  filled: true,
+                  fillColor: Colors.white,
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: AppColors.border)),
+                  enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: AppColors.border)),
+                  focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: AppColors.primary, width: 2)),
+                  contentPadding: const EdgeInsets.all(14),
+                ),
+              );
+            }),
+          ]
+
+          // ── Multiple choice / True-False ──────────────────────────
+          else if (options.isEmpty) ...[
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: AppColors.danger.withOpacity(0.06),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.danger.withOpacity(0.3))),
+              child: Row(children: [
+                Icon(Icons.warning_amber_rounded, color: AppColors.danger, size: 20),
+                const SizedBox(width: 10),
+                Expanded(child: Text(
+                  'No answer choices available for this question.',
+                  style: GoogleFonts.nunito(fontSize: 13, color: AppColors.danger))),
+              ]),
+            ),
+          ] else
+            ...options.map((opt) {
+              final optId = opt['id'].toString();
+              final selected = selectedOptionId == optId;
+              return GestureDetector(
+                onTap: () => setState(() => _answers[q['id'].toString()] = optId),
+                child: Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: selected ? AppColors.primary.withOpacity(0.08) : Colors.white,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: selected ? AppColors.primary : AppColors.border,
+                      width: selected ? 2 : 1.5,
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 22, height: 22,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: selected ? AppColors.primary : Colors.transparent,
+                          border: Border.all(
+                            color: selected ? AppColors.primary : AppColors.border,
+                            width: 2,
+                          ),
+                        ),
+                        child: selected
+                            ? const Icon(Icons.check, size: 14, color: Colors.white)
+                            : null,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(opt['option_text'] ?? '',
+                            style: GoogleFonts.nunito(
+                                fontSize: 14,
+                                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                                color: selected ? AppColors.primary : AppColors.textDark)),
+                      ),
+                    ],
                   ),
                 ),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 22, height: 22,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: selected ? AppColors.primary : Colors.transparent,
-                        border: Border.all(
-                          color: selected ? AppColors.primary : AppColors.border,
-                          width: 2,
-                        ),
-                      ),
-                      child: selected
-                          ? const Icon(Icons.check, size: 14, color: Colors.white)
-                          : null,
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(opt['option_text'] ?? '',
-                          style: GoogleFonts.nunito(
-                              fontSize: 14,
-                              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                              color: selected ? AppColors.primary : AppColors.textDark)),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          }),
+              );
+            }),
         ],
       ),
     );
   }
 
+  Future<void> _confirmSubmit() async {
+    // Count unanswered questions
+    final unanswered = _questions
+        .where((q) => !_answers.containsKey(q['id'].toString()))
+        .length;
+
+    if (unanswered > 0) {
+      final confirm = await showDialog<bool>(
+        context: context,
+        builder: (_) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Text('Submit Assessment?',
+              style: GoogleFonts.nunito(fontWeight: FontWeight.w900, color: AppColors.textDark)),
+          content: Text(
+            'You have $unanswered unanswered question${unanswered == 1 ? '' : 's'}. '
+            'Are you sure you want to submit?',
+            style: GoogleFonts.nunito(fontSize: 14, color: AppColors.textMid, height: 1.5)),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text('Go Back',
+                  style: GoogleFonts.nunito(color: AppColors.textLight, fontWeight: FontWeight.w700))),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+              child: Text('Submit Anyway',
+                  style: GoogleFonts.nunito(color: Colors.white, fontWeight: FontWeight.w800))),
+          ],
+        ),
+      );
+      if (confirm != true) return;
+    }
+
+    _submitAssessment();
+  }
+
   Widget _buildNavButtons() {
     final isLast = _currentQ == _questions.length - 1;
     final hasAnswer = _answers.containsKey(_questions[_currentQ]['id'].toString());
+    final qType = (_questions[_currentQ]['question_type'] ?? 'multiple_choice').toString().toLowerCase();
+    final isShortAnswer = qType == 'short_answer' || qType == 'essay';
+
+    // Short answer questions are optional — don't block navigation
+    final canProceed = hasAnswer || isShortAnswer;
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -471,10 +657,10 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
           Expanded(
             flex: 2,
             child: ElevatedButton(
-              onPressed: !hasAnswer
+              onPressed: !canProceed
                   ? null
                   : isLast
-                      ? (_submitting ? null : _submitAssessment)
+                      ? (_submitting ? null : _confirmSubmit)
                       : () => setState(() => _currentQ++),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primary,
@@ -521,11 +707,8 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
                           : AppColors.danger.withOpacity(0.1),
                     ),
                     child: Center(
-                      child: Icon(
-                        _passed ? Icons.emoji_events_rounded : Icons.menu_book_rounded,
-                        size: 44,
-                        color: _passed ? AppColors.primary : AppColors.danger,
-                      ),
+                      child: Text(_passed ? '🎉' : '📚',
+                          style: const TextStyle(fontSize: 44)),
                     ),
                   ),
                   const SizedBox(height: 20),
@@ -583,11 +766,7 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
                               color: AppColors.primary.withOpacity(0.1),
                               borderRadius: BorderRadius.circular(12),
                             ),
-                            child: Icon(
-                              Icons.check_circle_rounded,
-                              size: 24,
-                              color: AppColors.primary,
-                            ),
+                            child: const Text('✅', style: TextStyle(fontSize: 20)),
                           ),
                           const SizedBox(width: 14),
                           Expanded(
