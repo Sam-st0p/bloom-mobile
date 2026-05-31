@@ -9,11 +9,13 @@ import '../theme/app_theme.dart';
 class PdfViewerScreen extends StatefulWidget {
   final String url;
   final String title;
+  final VoidCallback? onComplete;
 
   const PdfViewerScreen({
     super.key,
     required this.url,
     required this.title,
+    this.onComplete,
   });
 
   @override
@@ -109,6 +111,9 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                   },
                   onPageChanged: (page, total) {
                     if (mounted) setState(() => _currentPage = page ?? 0);
+                        if (total != null && page != null && total > 0 && page >= total - 1) {
+                      widget.onComplete?.call();
+                    }
                   },
                   onError: (error) {
                     if (mounted) setState(() => _error = error.toString());

@@ -221,18 +221,15 @@ class _LibraryScreenState extends State<LibraryScreen> {
       metadata: {'file_name': file['file_name'], 'module_id': file['module_id']},
     );
 
-    if (_selectedModule != null) {
-      final currentProgress = _progressMap[_selectedModule!.id] ?? 0;
-      if (currentProgress < 100) {
-        final newPct = (currentProgress + 20).clamp(0, 90);
-        await _updateProgress(_selectedModule!.id, newPct);
-      }
-    }
-
     if (!mounted) return;
     Navigator.push(context, MaterialPageRoute(
-        builder: (_) => PdfViewerScreen(
-            url: url, title: file['file_name'] ?? 'Document')));
+    builder: (_) => PdfViewerScreen(
+        url: url,
+        title: file['file_name'] ?? 'Document',
+        onComplete: () => _updateProgress(_selectedModule!.id, 100), // ← add
+        )
+      )
+    );
   }
 
   Future<void> _updateProgress(String moduleId, int pct) async {
@@ -705,14 +702,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
                             color: AppColors.textDark)),
                     const SizedBox(height: 8),
                     if (module.description != null &&
-                        module.description!.isNotEmpty) ...[
-                      Text(module.description!,
-                          style: GoogleFonts.nunito(
-                              fontSize: 13,
-                              color: AppColors.textMid,
-                              height: 1.5)),
-                      const SizedBox(height: 12),
-                    ],
+                          module.description!.isNotEmpty) ...[
+                        _ExpandableDescription(description: module.description!),
+                        const SizedBox(height: 12),
+                      ],
                     if (author != null || pubDate != null) ...[
                       const Divider(height: 1),
                       const SizedBox(height: 12),
@@ -875,11 +868,16 @@ class _MetaChip extends StatelessWidget {
     return Row(mainAxisSize: MainAxisSize.min, children: [
       Icon(icon, size: 13, color: AppColors.primary),
       const SizedBox(width: 5),
-      Text(label,
+      Flexible(                          // ← wrap in Flexible
+        child: Text(
+          label,
           style: GoogleFonts.nunito(
               fontSize: 12,
               color: AppColors.textMid,
-              fontWeight: FontWeight.w600)),
+              fontWeight: FontWeight.w600),
+          softWrap: true,                // ← allow wrapping
+        ),
+      ),
     ]);
   }
 }
@@ -1556,6 +1554,97 @@ class _FileTile extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+// ── Expandable description ─────────────────────────────────
+class _ExpandableDescription extends StatefulWidget {
+  final String description;
+  const _ExpandableDescription({required this.description});
+
+  @override
+  State<_ExpandableDescription> createState() => _ExpandableDescriptionState();
+}
+
+class _ExpandableDescriptionState extends State<_ExpandableDescription> {
+  static const int _collapsedMaxLines = 4;
+  bool _expanded = false;
+  bool _isOverflowing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Check if text actually overflows after layout
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final tp = TextPainter(
+        text: TextSpan(
+          text: widget.description,
+          style: GoogleFonts.nunito(
+              fontSize: 13, color: AppColors.textMid, height: 1.5),
+        ),
+        maxLines: _collapsedMaxLines,
+        textDirection: TextDirection.ltr,
+      )..layout(
+          maxWidth: MediaQuery.of(context).size.width - 72, // card padding
+        );
+      if (tp.didExceedMaxLines && mounted) {
+        setState(() => _isOverflowing = true);
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        AnimatedCrossFade(
+          firstChild: Text(
+            widget.description,
+            maxLines: _collapsedMaxLines,
+            overflow: TextOverflow.ellipsis,
+            style: GoogleFonts.nunito(
+                fontSize: 13, color: AppColors.textMid, height: 1.5),
+          ),
+          secondChild: Text(
+            widget.description,
+            style: GoogleFonts.nunito(
+                fontSize: 13, color: AppColors.textMid, height: 1.5),
+          ),
+          crossFadeState: _expanded
+              ? CrossFadeState.showSecond
+              : CrossFadeState.showFirst,
+          duration: const Duration(milliseconds: 200),
+        ),
+        if (_isOverflowing) ...[
+          const SizedBox(height: 6),
+          GestureDetector(
+            onTap: () => setState(() => _expanded = !_expanded),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  _expanded ? 'Show less' : 'Show more',
+                  style: GoogleFonts.nunito(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.primary),
+                ),
+                const SizedBox(width: 3),
+                Icon(
+                  _expanded
+                      ? Icons.keyboard_arrow_up_rounded
+                      : Icons.keyboard_arrow_down_rounded,
+                  size: 16,
+                  color: AppColors.primary,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ],
     );
   }
 }

@@ -3,10 +3,9 @@
 
 import 'dart:async';
 import 'dart:typed_data';
-// ✅ REMOVED: dart:html (web-only, crashes on Android/iOS)
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:image_picker/image_picker.dart'; // ✅ ADDED: works on mobile & web
+import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../theme/app_theme.dart';
 import '../models/models.dart';
@@ -103,8 +102,7 @@ String _fmtDate(String? iso) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  ✅ CROSS-PLATFORM IMAGE PICKER (replaces dart:html _pickImageWeb)
-//  Works on Android, iOS, and Web via the image_picker package.
+//  CROSS-PLATFORM IMAGE PICKER
 // ─────────────────────────────────────────────────────────────────────────────
 Future<({Uint8List bytes, String mime, String ext})?> _pickImage() async {
   final picker = ImagePicker();
@@ -117,7 +115,7 @@ Future<({Uint8List bytes, String mime, String ext})?> _pickImage() async {
   final bytes = await picked.readAsBytes();
 
   if (bytes.lengthInBytes > 2 * 1024 * 1024) {
-    throw 'size'; // caller checks for this
+    throw 'size';
   }
 
   final ext = picked.name.split('.').last.toLowerCase();
@@ -303,7 +301,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
-  // ── ✅ Avatar upload (cross-platform, no dart:html) ────────────────────────
+  // ── Avatar upload ──────────────────────────────────────────────────────────
   Future<void> _pickAndUploadAvatar() async {
     if (_uploadingAvatar) return;
 
@@ -312,7 +310,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     String ext  = 'jpg';
 
     try {
-      final result = await _pickImage(); // ✅ single method, works everywhere
+      final result = await _pickImage();
       if (result == null) return;
       bytes = result.bytes;
       mime  = result.mime;
@@ -410,7 +408,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
-  // ── Validate all fields for current role ───────────────────────────────────
+  // ── Validate all fields ────────────────────────────────────────────────────
   bool _validateAll() {
     final fnErr  = _validateName(_firstNameCtrl.text, 'First name');
     final lnErr  = _validateName(_lastNameCtrl.text,  'Last name');
@@ -877,19 +875,30 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           fontSize: 13)),
                 ],
                 const SizedBox(height: 10),
-                Wrap(
-                  alignment: WrapAlignment.center,
-                  spacing: 8, runSpacing: 6,
-                  children: [
-                    if ((_profileData?['department'] as String? ?? '')
-                        .isNotEmpty)
-                      _InfoPill(
-                          icon: Icons.school_outlined,
-                          label: _profileData!['department'] as String),
-                    _InfoPill(
-                        icon: Icons.calendar_today_outlined,
-                        label: 'Joined $_joinedDate'),
-                  ],
+
+                // ✅ FIX 1: Constrain pills inside a width-limited container
+                // to prevent the department pill from overflowing the screen.
+                LayoutBuilder(
+                  builder: (context, constraints) => ConstrainedBox(
+                    constraints: BoxConstraints(
+                        maxWidth: constraints.maxWidth),
+                    child: Wrap(
+                      alignment: WrapAlignment.center,
+                      spacing: 8, runSpacing: 6,
+                      children: [
+                        if ((_profileData?['department'] as String? ?? '')
+                            .isNotEmpty)
+                          _InfoPill(
+                              icon: Icons.school_outlined,
+                              label: _profileData!['department'] as String,
+                              // Allow pill text to truncate cleanly
+                              maxWidth: constraints.maxWidth - 32),
+                        _InfoPill(
+                            icon: Icons.calendar_today_outlined,
+                            label: 'Joined $_joinedDate'),
+                      ],
+                    ),
+                  ),
                 ),
               ]),
             ),
@@ -1282,15 +1291,28 @@ class _RequiredFieldsHint extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  INFO PILL
+//  INFO PILL  ✅ FIX 1 APPLIED HERE
+//  Added `maxWidth` parameter so long department names truncate with ellipsis
+//  instead of overflowing off-screen.
 // ─────────────────────────────────────────────────────────────────────────────
 class _InfoPill extends StatelessWidget {
   final IconData icon;
   final String label;
-  const _InfoPill({required this.icon, required this.label});
+  // Optional max width so text truncates rather than overflows.
+  final double? maxWidth;
+
+  const _InfoPill({
+    required this.icon,
+    required this.label,
+    this.maxWidth,
+  });
 
   @override
   Widget build(BuildContext context) => Container(
+    // ✅ Constrain the pill's total width when a maxWidth is supplied.
+    constraints: maxWidth != null
+        ? BoxConstraints(maxWidth: maxWidth!)
+        : null,
     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
     decoration: BoxDecoration(
       color: Colors.white.withOpacity(0.18),
@@ -1299,10 +1321,18 @@ class _InfoPill extends StatelessWidget {
     child: Row(mainAxisSize: MainAxisSize.min, children: [
       Icon(icon, color: Colors.white, size: 12),
       const SizedBox(width: 5),
-      Text(label,
+      // ✅ Flexible so the text shrinks/truncates inside the row.
+      Flexible(
+        child: Text(
+          label,
           style: GoogleFonts.poppins(
-              color: Colors.white, fontSize: 11,
-              fontWeight: FontWeight.w500)),
+              color: Colors.white,
+              fontSize: 11,
+              fontWeight: FontWeight.w500),
+          overflow: TextOverflow.ellipsis,
+          maxLines: 1,
+        ),
+      ),
     ]),
   );
 }
@@ -1535,8 +1565,10 @@ class _HorizontalSection extends StatelessWidget {
           ]),
         ))
       else
+        // ✅ FIX 2: Increased height from 140 → 150 to eliminate the
+        // bottom 5 px overflow in _CertPreviewCard / _BadgePreviewCard.
         SizedBox(
-          height: 140,
+          height: 150,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.only(bottom: 4),
@@ -1550,7 +1582,9 @@ class _HorizontalSection extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  CERTIFICATE PREVIEW CARD
+//  CERTIFICATE PREVIEW CARD  ✅ FIX 2 APPLIED HERE
+//  Reduced internal spacing and font sizes so the card content fits cleanly
+//  without overflowing its 150 px tall container.
 // ─────────────────────────────────────────────────────────────────────────────
 class _CertPreviewCard extends StatelessWidget {
   final Map<String, dynamic> cert;
@@ -1566,39 +1600,51 @@ class _CertPreviewCard extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) => Container(
-    width: 110,
-    decoration: BoxDecoration(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(12),
-      border: Border.all(color: const Color(0xFFC8E6C9), width: 1.5),
-      boxShadow: [BoxShadow(
-          color: Colors.black.withOpacity(0.06),
-          blurRadius: 6, offset: const Offset(0, 2))],
-    ),
-    padding: const EdgeInsets.all(10),
-    child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-      Container(
-        width: 52, height: 52,
-        decoration: BoxDecoration(
-            color: const Color(0xFFE8F5E9),
-            borderRadius: BorderRadius.circular(12)),
-        child: const Center(child: Icon(
-            Icons.workspace_premium_rounded,
-            size: 30, color: Color(0xFF2D6A2D))),
+  Widget build(BuildContext context) => GestureDetector(
+    onTap: onTap,
+    child: Container(
+      width: 110,
+      // ✅ Let the card fill its parent height in the ListView instead of
+      // having its own fixed height that may overflow.
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFC8E6C9), width: 1.5),
+        boxShadow: [BoxShadow(
+            color: Colors.black.withOpacity(0.06),
+            blurRadius: 6, offset: const Offset(0, 2))],
       ),
-      const SizedBox(height: 6),
-      Text(_title,
-          style: GoogleFonts.poppins(
-              fontSize: 11, fontWeight: FontWeight.w600,
-              color: const Color(0xFF1A2E1A)),
-          textAlign: TextAlign.center,
-          maxLines: 2, overflow: TextOverflow.ellipsis),
-      const SizedBox(height: 3),
-      Text(_fmtDate(cert['issued_at'] as String?),
-          style: GoogleFonts.poppins(fontSize: 9, color: Colors.grey),
-          textAlign: TextAlign.center),
-    ]),
+      padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 48, height: 48,          // ✅ slightly smaller icon box
+            decoration: BoxDecoration(
+                color: const Color(0xFFE8F5E9),
+                borderRadius: BorderRadius.circular(12)),
+            child: const Center(child: Icon(
+                Icons.workspace_premium_rounded,
+                size: 28, color: Color(0xFF2D6A2D))),
+          ),
+          const SizedBox(height: 5),
+          Text(_title,
+              style: GoogleFonts.poppins(
+                  fontSize: 10,              // ✅ 11 → 10 to free up space
+                  fontWeight: FontWeight.w600,
+                  color: const Color(0xFF1A2E1A)),
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis),
+          const SizedBox(height: 2),
+          Text(_fmtDate(cert['issued_at'] as String?),
+              style: GoogleFonts.poppins(
+                  fontSize: 9, color: Colors.grey),
+              textAlign: TextAlign.center),
+        ],
+      ),
+    ),
   );
 }
 
@@ -1629,17 +1675,19 @@ class _BadgePreviewCard extends StatelessWidget {
               color: Colors.black.withOpacity(0.06),
               blurRadius: 6, offset: const Offset(0, 2))],
         ),
-        padding: const EdgeInsets.all(10),
-        child: Column(mainAxisAlignment: MainAxisAlignment.center,
-            children: [
+        padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
+          children: [
           Container(
-            width: 52, height: 52,
+            width: 48, height: 48,
             decoration: BoxDecoration(
                 color: const Color(0xFFFEF9C3),
                 borderRadius: BorderRadius.circular(12)),
             child: Center(child: iconUrl != null
                 ? ClipRRect(borderRadius: BorderRadius.circular(8),
-                    child: Image.network(iconUrl, width: 34, height: 34,
+                    child: Image.network(iconUrl, width: 30, height: 30,
                         fit: BoxFit.contain,
                         errorBuilder: (_, __, ___) => const Icon(
                             Icons.emoji_events_rounded,
@@ -1647,14 +1695,15 @@ class _BadgePreviewCard extends StatelessWidget {
                 : const Icon(Icons.emoji_events_rounded,
                     size: 26, color: Color(0xFFF59E0B))),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 5),
           Text(name,
               style: GoogleFonts.poppins(
-                  fontSize: 11, fontWeight: FontWeight.w600,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
                   color: const Color(0xFF1A2E1A)),
               textAlign: TextAlign.center,
               maxLines: 2, overflow: TextOverflow.ellipsis),
-          const SizedBox(height: 3),
+          const SizedBox(height: 2),
           Text(awarded,
               style: GoogleFonts.poppins(fontSize: 9, color: Colors.grey),
               textAlign: TextAlign.center),

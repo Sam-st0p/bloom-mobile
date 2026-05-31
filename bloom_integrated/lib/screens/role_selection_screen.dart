@@ -1,22 +1,27 @@
 // lib/screens/role_selection_screen.dart
 // BLOOM GAD Mobile App — Role Selection Screen
 
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../theme/app_theme.dart';
 
+
 class RoleSelectionScreen extends StatefulWidget {
   final VoidCallback onRoleSelected;
   const RoleSelectionScreen({super.key, required this.onRoleSelected});
+
 
   @override
   State<RoleSelectionScreen> createState() => _RoleSelectionScreenState();
 }
 
+
 class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
   String? _selectedRole;
   bool _loading = false;
+
 
   static const _roles = [
     {
@@ -51,13 +56,16 @@ class _RoleSelectionScreenState extends State<RoleSelectionScreen> {
     },
   ];
 
+
 Future<void> _confirmRole() async {
   if (_selectedRole == null) return;
   setState(() => _loading = true);
 
+
   try {
     final userId = Supabase.instance.client.auth.currentUser?.id;
     if (userId == null) throw Exception('No user session');
+
 
     // UPDATE not upsert — the profile row already exists from signUpCompleteProfile.
     // Upsert was trying to insert a new row with only id+role+updated_at,
@@ -69,6 +77,7 @@ Future<void> _confirmRole() async {
           'updated_at': DateTime.now().toIso8601String(),
         })
         .eq('id', userId);
+
 
     widget.onRoleSelected();
   } catch (e) {
@@ -84,6 +93,7 @@ Future<void> _confirmRole() async {
     if (mounted) setState(() => _loading = false);
   }
 }
+
 
   @override
   Widget build(BuildContext context) {
@@ -135,7 +145,9 @@ Future<void> _confirmRole() async {
                 ),
               ),
 
+
               const SizedBox(height: 36),
+
 
               // Role cards
               Expanded(
@@ -237,7 +249,9 @@ Future<void> _confirmRole() async {
                 ),
               ),
 
+
               const SizedBox(height: 24),
+
 
               // Confirm button
               SizedBox(
@@ -273,7 +287,9 @@ Future<void> _confirmRole() async {
                 ),
               ),
 
+
               const SizedBox(height: 12),
+
 
               Center(
                 child: Text(

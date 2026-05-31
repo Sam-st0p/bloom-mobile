@@ -1,285 +1,183 @@
 // lib/services/auth_service.dart
-// BLOOM GAD Mobile App — Authentication Service
+// BLOOM GAD Mobile App — Auth Service
 
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter/foundation.dart';
 import 'package:google_sign_in/google_sign_in.dart';
-import '../utils/rate_limiter.dart';
-import '../utils/validators.dart';
-
-final _supabase = Supabase.instance.client;
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class AuthService {
+  static final _supabase = Supabase.instance.client;
 
-  // ── Validate credentials only (no persistent session) ─────────────
-  static Future<String?> validateCredentials(String email, String password) async {
+  // ── Sign In (email + password → OTP flow) ──────────────────────────────────
+  // Called by LoginScreen as: AuthService.signIn(email, password)
+  // Returns null on success, or an error string on failure.
+  static Future<String?> signIn(String email, String password) async {
     try {
-      await _supabase.auth.signInWithPassword(
-        email: email, password: password);
-      // Immediately destroy session — OTP must complete login
-      await _supabase.auth.signOut(scope: SignOutScope.local);
-      return null;
+      // Step 1: Verify credentials
+      final authResponse = await _supabase.auth.signInWithPassword(
+        email: email,
+        password: password,
+      );
+
+      final userId = authResponse.user?.id;
+      if (userId == null) return 'Invalid email or password.';
+
+      // Step 2: Check is_active before allowing OTP
+      final profile = await _supabase
+          .from('profiles')
+          .select('is_active')
+          .eq('id', userId)
+          .maybeSingle();
+
+      // Sign out immediately — session is established only after OTP
+      await _supabase.auth.signOut();
+
+      if (profile == null) return 'Account not found.';
+
+      final isActive = profile['is_active'] as bool? ?? false;
+      if (!isActive) {
+        return 'Your account has been deactivated. Please contact support.';
+      }
+
+      // Step 3: Send OTP to the verified, active user
+      await _supabase.auth.signInWithOtp(
+        email: email,
+        shouldCreateUser: false,
+      );
+
+      return null; // success — OTP sent
     } on AuthException catch (e) {
-      // Generic message — never reveal if email exists or not
-      final msg = e.message.toLowerCase();
-      if (msg.contains('invalid') || msg.contains('credentials') ||
-          msg.contains('not found') || msg.contains('wrong')) {
-        return 'Invalid email or password.';
-      }
-      if (msg.contains('too many') || msg.contains('rate')) {
-        return 'Too many attempts. Please wait and try again.';
-      }
-      return 'Invalid email or password.';
+      return e.message;
     } catch (_) {
       return 'An unexpected error occurred. Please try again.';
     }
   }
 
-  // ── Sign In (validates credentials then sends OTP) ─────────────────
-  static Future<String?> signIn(String email, String password) async {
-    // Sanitize inputs
-    final cleanEmail = AppValidators.normalizeEmail(email);
-
-    final error = await validateCredentials(cleanEmail, password);
-    if (error != null) return error;
-
-    try {
-      await _supabase.auth.signInWithOtp(
-        email:            cleanEmail,
-        shouldCreateUser: false,
-        emailRedirectTo:  null,
-      );
-      return null;
-    } on AuthException catch (e) {
-      final msg = e.message.toLowerCase();
-      if (msg.contains('rate') || msg.contains('too many')) {
-        return 'Too many requests. Please wait a moment and try again.';
-      }
-      return 'Failed to send verification code. Please try again.';
-    } catch (_) {
-      return 'Failed to send verification code. Please try again.';
-    }
-  }
-
-  // ── Sign Up ────────────────────────────────────────────────────────
-  //
-  // Supabase silently returns HTTP 200 for duplicate signups when email
-  // confirmation is enabled — no AuthException is thrown. The response
-  // object is the only reliable signal: a genuine new account always has
-  // at least one entry in user.identities, while a duplicate signup returns
-  // an identities list that is empty []. This is Supabase's documented
-  // behaviour for detecting duplicate registrations on the client side.
+  // ── Sign Up ─────────────────────────────────────────────────────────────────
+  // Called by SignupScreen as:
+  //   AuthService.signUp(email: ..., password: ..., fullName: ..., studentId: ...)
+  // Returns null on success, or an error string on failure.
   static Future<String?> signUp({
     required String email,
     required String password,
     required String fullName,
     required String studentId,
   }) async {
-    final cleanEmail    = AppValidators.normalizeEmail(email);
-    final cleanFullName = AppValidators.sanitizeName(fullName);
-
     try {
       final response = await _supabase.auth.signUp(
-        email:    cleanEmail,
+        email: email,
         password: password,
         data: {
-          'full_name': cleanFullName,
+          'full_name':  fullName,
+          'student_id': studentId,
         },
       );
 
-      // ── Duplicate email detection ──────────────────────────────────
-      // When email confirmations are ON, Supabase returns a fake-success
-      // response instead of an error. The tell is an empty identities list.
-      // A real new user always has identities.length >= 1.
-      final identities = response.user?.identities;
-      if (identities != null && identities.isEmpty) {
-        return 'This email is already associated with an existing account. '
-               'Please log in or use a different email address.';
+      if (response.user == null) {
+        return 'Sign up failed. Please try again.';
       }
 
-      return null;
-
+      return null; // success — OTP sent by Supabase automatically
     } on AuthException catch (e) {
-      // Fallback for Supabase configs that DO throw on duplicates,
-      // and for any other auth-layer errors.
       final msg = e.message.toLowerCase();
       if (msg.contains('already registered') || msg.contains('already exists')) {
-        return 'This email is already associated with an existing account. '
-               'Please log in or use a different email address.';
+        return 'An account with this email already exists.';
       }
-      if (msg.contains('password')) {
-        return 'Password does not meet the requirements.';
-      }
-      if (msg.contains('invalid email')) {
-        return 'Please enter a valid email address.';
-      }
-      return 'Sign up failed. Please try again.';
+      return e.message;
     } catch (_) {
-      return 'Sign up failed. Please try again.';
+      return 'An unexpected error occurred. Please try again.';
     }
   }
 
-  // ── Complete profile after OTP verified (signup) ───────────────────
+  // ── Complete Profile after signup OTP ───────────────────────────────────────
+  // Called by OtpScreen as:
+  //   AuthService.signUpCompleteProfile(email: ..., fullName: ..., studentId: ...)
+  // Writes/updates the profiles row. Non-fatal — caller wraps in try/catch.
   static Future<void> signUpCompleteProfile({
     required String email,
     required String fullName,
-    String? studentId,
+    required String studentId,
   }) async {
-    try {
-      final user = _supabase.auth.currentUser;
-      if (user == null) return;
+    final userId = _supabase.auth.currentUser?.id;
+    if (userId == null) return;
 
-      await _supabase.from('profiles').upsert({
-        'id':        user.id,
-        'full_name': AppValidators.sanitizeName(fullName),
-        'email':     AppValidators.normalizeEmail(email),
-        'is_active': true,
-        'role':      null, // role set separately in RoleSelectionScreen
-      }, onConflict: 'id', ignoreDuplicates: false);
-    } catch (_) {
-      // Non-blocking — AuthGate will handle routing via role check
-    }
+    await _supabase.from('profiles').upsert({
+      'id':         userId,
+      'email':      email,
+      'full_name':  fullName,
+      'student_id': studentId,
+      'is_active':  true,
+      'updated_at': DateTime.now().toIso8601String(),
+    });
   }
 
-  // ── Sign In with Google ────────────────────────────────────────────
-  static bool _googleInitialized = false;
+  // ── Update last_sign_in timestamp ───────────────────────────────────────────
+  // Called by OtpScreen after a successful login OTP verification.
+  static Future<void> updateLastSignIn() async {
+    final userId = _supabase.auth.currentUser?.id;
+    if (userId == null) return;
 
+    await _supabase.from('profiles').update({
+      'last_sign_in_at': DateTime.now().toIso8601String(),
+    }).eq('id', userId);
+  }
+
+  // ── Google Sign-In ──────────────────────────────────────────────────────────
+  // Called by both LoginScreen and SignupScreen as: AuthService.signInWithGoogle()
+  // Returns null on success, 'Google sign-in cancelled.' if user cancelled,
+  // or an error string on failure.
   static Future<String?> signInWithGoogle() async {
     try {
-      final bool isWeb = identical(0, 0.0);
-
-      if (isWeb) {
+      // Web: use Supabase OAuth redirect
+      if (kIsWeb) {
         await _supabase.auth.signInWithOAuth(
           OAuthProvider.google,
-          redirectTo: Uri.base.origin,
+          redirectTo: 'http://localhost:8080',
         );
         return null;
       }
 
-      const webClientId =
-          '7383107443-fbiv7p4kb10voq9c88d8i0ccda6idejl.apps.googleusercontent.com';
-      const androidClientId =
-          '7383107443-9mnl4tqep7bu5vu2octrm69c58c6n1sq.apps.googleusercontent.com';
+      // Mobile (Android / iOS): google_sign_in v7+ uses GoogleSignIn.instance
+      // and authenticateOrReauthenticate() instead of the old constructor + signIn().
+      final googleSignIn = GoogleSignIn.instance;
 
-      if (!_googleInitialized) {
-        await GoogleSignIn.instance.initialize(
-          clientId:       androidClientId,
-          serverClientId: webClientId,
-        );
-        _googleInitialized = true;
-      }
+      // Initialise once — safe to call multiple times (no-op if already done).
+      await googleSignIn.initialize();
 
-      final googleUser = await GoogleSignIn.instance.authenticate();
-      final idToken    = googleUser.authentication.idToken;
+      // Attempt silent sign-in first (returns quickly if already signed in).
+      GoogleSignInAccount? googleUser =
+          await googleSignIn.attemptLightweightAuthentication();
+
+      // Fall back to the full interactive flow if silent sign-in didn't work.
+      googleUser ??=
+          googleUser ??= await googleSignIn.authenticate();
+
+      if (googleUser == null) return 'Google sign-in cancelled.';
+
+      final googleAuth  = googleUser.authentication;
+      final idToken     = googleAuth.idToken;
+
       if (idToken == null) return 'Google sign-in failed. Please try again.';
 
       await _supabase.auth.signInWithIdToken(
-        provider: OAuthProvider.google,
-        idToken:  idToken,
+        provider:    OAuthProvider.google,
+        idToken:     idToken,
       );
 
-      await _ensureProfile();
-      return null;
-
+      return null; // success
     } on AuthException catch (e) {
       return e.message;
     } catch (e) {
       final msg = e.toString().toLowerCase();
-      if (msg.contains('cancel') || msg.contains('abort')) {
+      if (msg.contains('cancel') || msg.contains('cancelled')) {
         return 'Google sign-in cancelled.';
       }
       return 'Google sign-in failed. Please try again.';
     }
   }
 
-  // ── Ensure profile row exists (Google users) ───────────────────────
-  static Future<void> _ensureProfile() async {
-    try {
-      final user = _supabase.auth.currentUser;
-      if (user == null) return;
-
-      final existing = await _supabase
-          .from('profiles')
-          .select('id, role')
-          .eq('id', user.id)
-          .maybeSingle();
-
-      if (existing == null) {
-        await _supabase.from('profiles').insert({
-          'id':        user.id,
-          'full_name': AppValidators.sanitizeName(
-              user.userMetadata?['full_name']?.toString() ?? ''),
-          'email':     user.email ?? '',
-          'is_active': true,
-          'role':      null,
-        });
-      }
-
-      await updateLastSignIn();
-    } catch (_) {}
-  }
-
-  // ── Update last sign in ────────────────────────────────────────────
-  static Future<void> updateLastSignIn() async {
-    try {
-      final user = _supabase.auth.currentUser;
-      if (user == null) return;
-      await _supabase
-          .from('profiles')
-          .update({'last_sign_in_at': DateTime.now().toUtc().toIso8601String()})
-          .eq('id', user.id);
-    } catch (_) {}
-  }
-
-  // ── Sign Out ───────────────────────────────────────────────────────
+  // ── Sign Out ────────────────────────────────────────────────────────────────
   static Future<void> signOut() async {
-    RateLimiter.reset('login');
-    RateLimiter.reset('reset');
-    try { await GoogleSignIn.instance.signOut(); } catch (_) {}
-    try {
-      await _supabase.auth.signOut();
-    } catch (_) {
-      await _supabase.auth.signOut(scope: SignOutScope.local);
-    }
+    await _supabase.auth.signOut();
   }
-
-  // ── Check and update inactivity ────────────────────────────────────
-  static Future<bool> checkAndUpdateActivity() async {
-    try {
-      final user = _supabase.auth.currentUser;
-      if (user == null) return false;
-
-      final profile = await _supabase
-          .from('profiles')
-          .select('last_sign_in_at, is_active')
-          .eq('id', user.id)
-          .maybeSingle();
-
-      if (profile == null) return false;
-      if (profile['is_active'] == false) return false;
-
-      final lastSignIn = profile['last_sign_in_at'];
-      if (lastSignIn == null) { await updateLastSignIn(); return true; }
-
-      final last     = DateTime.parse(lastSignIn);
-      final now      = DateTime.now().toUtc();
-      final inactive = now.difference(last).inSeconds;
-      const kInactivitySeconds = 30 * 24 * 60 * 60;
-
-      if (inactive > kInactivitySeconds) {
-        await _supabase.from('profiles')
-            .update({'is_active': false}).eq('id', user.id);
-        await _supabase.auth.signOut();
-        return false;
-      }
-
-      await updateLastSignIn();
-      return true;
-    } catch (_) {
-      return true;
-    }
-  }
-
-  // ── Helpers ────────────────────────────────────────────────────────
-  static User?              get currentUser       => _supabase.auth.currentUser;
-  static Stream<AuthState>  get authStateChanges  => _supabase.auth.onAuthStateChange;
 }
