@@ -1,13 +1,12 @@
 // lib/main.dart
 // BLOOM GAD Mobile App — Main entry point + AuthGate
 
-
 import 'dart:async';
 import 'package:app_links/app_links.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-
 
 import 'theme/app_theme.dart';
 import 'screens/login_screen.dart';
@@ -17,9 +16,9 @@ import 'screens/role_selection_screen.dart';
 import 'screens/reset_password_screen.dart';
 import 'screens/main_shell.dart';
 
-
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
   await Supabase.initialize(
     url:     'https://vfpgzuehfebhawlidhsz.supabase.co',
     anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZmcGd6dWVoZmViaGF3bGlkaHN6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMwMjk4ODMsImV4cCI6MjA4ODYwNTg4M30.ZzaOTYxShnwwLDMNH1uZKb59lYsB6pnNk1mPik2VRR0',
@@ -27,13 +26,20 @@ Future<void> main() async {
       authFlowType: AuthFlowType.implicit,
     ),
   );
+
+  // Google Sign-In v7: must initialize once before runApp.
+  // serverClientId = Web Client ID from Google Cloud Console → Credentials.
+  if (!kIsWeb) {
+    await GoogleSignIn.instance.initialize(
+      serverClientId: 'YOUR_WEB_CLIENT_ID.apps.googleusercontent.com',
+    );
+  }
+
   runApp(const BloomApp());
 }
 
-
 class BloomApp extends StatelessWidget {
   const BloomApp({super.key});
-
 
   @override
   Widget build(BuildContext context) {
@@ -49,7 +55,6 @@ class BloomApp extends StatelessWidget {
   }
 }
 
-
 // ── Auth status ───────────────────────────────────────────────────────────────
 enum _AuthStatus {
   loading,
@@ -59,16 +64,13 @@ enum _AuthStatus {
   passwordRecovery,
 }
 
-
 // ── Recovery URL detection (web only) ────────────────────────────────────────
 bool _isRecoveryUrl() {
   if (!kIsWeb) return false;
 
-
   debugPrint('🔍 BASE URI:  ${Uri.base}');
   debugPrint('🔍 FRAGMENT:  ${Uri.base.fragment}');
   debugPrint('🔍 QUERY:     ${Uri.base.queryParameters}');
-
 
   final fragment = Uri.base.fragment;
   if (fragment.isNotEmpty) {
@@ -77,56 +79,46 @@ bool _isRecoveryUrl() {
     if (params['type'] == 'recovery') return true;
   }
 
-
   final query = Uri.base.queryParameters;
   debugPrint('🔍 QUERY PARAMS: $query');
   if (query['type'] == 'recovery') return true;
 
-
   return false;
 }
-
 
 // ── AuthGate ──────────────────────────────────────────────────────────────────
 class AuthGate extends StatefulWidget {
   const AuthGate({super.key});
 
-
   @override
   State<AuthGate> createState() => _AuthGateState();
 }
 
-
 class _AuthGateState extends State<AuthGate> {
-  _AuthStatus         _status   = _AuthStatus.loading;
+  _AuthStatus         _status  = _AuthStatus.loading;
   StreamSubscription? _authSub;
-  StreamSubscription? _linkSub;  // ← new
-  int                 _checkId  = 0;
-
+  StreamSubscription? _linkSub;
+  int                 _checkId = 0;
 
   @override
   void initState() {
     super.initState();
     _initAuth();
-    _initDeepLinks(); // ← new
+    _initDeepLinks();
   }
-
 
   @override
   void dispose() {
     _authSub?.cancel();
-    _linkSub?.cancel(); // ← new
+    _linkSub?.cancel();
     super.dispose();
   }
 
-
-  // ── Deep link listener (mobile only) ─────────────────────────────────────
+  // ── Deep link listener (mobile only) ──────────────────────────────────────
   void _initDeepLinks() {
     if (kIsWeb) return;
     final appLinks = AppLinks();
 
-
-    // Handle deep link if app was opened from a cold start via link
     appLinks.getInitialLink().then((uri) {
       if (uri != null) {
         debugPrint('🔗 Initial deep link: $uri');
@@ -134,14 +126,11 @@ class _AuthGateState extends State<AuthGate> {
       }
     });
 
-
-    // Handle deep link while app is already running
     _linkSub = appLinks.uriLinkStream.listen((uri) {
       debugPrint('🔗 Deep link received: $uri');
       _handleDeepLink(uri);
     });
   }
-
 
   void _handleDeepLink(Uri uri) {
     debugPrint('🔗 Handling deep link: $uri');
@@ -151,10 +140,8 @@ class _AuthGateState extends State<AuthGate> {
     }
   }
 
-
   Future<void> _initAuth() async {
     debugPrint('🚀 _initAuth() called');
-
 
     if (_isRecoveryUrl()) {
       debugPrint('✅ Recovery URL detected in _initAuth — showing ResetPasswordScreen');
@@ -163,13 +150,10 @@ class _AuthGateState extends State<AuthGate> {
       return;
     }
 
-
     _subscribeToAuthEvents();
-
 
     final session = Supabase.instance.client.auth.currentSession;
     debugPrint('🔍 Existing session: ${session != null ? "YES (user: ${session.user.email})" : "NO"}');
-
 
     if (session != null) {
       await _resolveAuthenticatedStatus();
@@ -178,23 +162,19 @@ class _AuthGateState extends State<AuthGate> {
     }
   }
 
-
   void _subscribeToAuthEvents() {
     _authSub = Supabase.instance.client.auth.onAuthStateChange.listen(
       (data) async {
         final event = data.event;
         debugPrint('🔔 AUTH EVENT: $event  |  user: ${data.session?.user.email ?? "none"}');
 
-
         if (event == AuthChangeEvent.tokenRefreshed) return;
-
 
         if (event == AuthChangeEvent.passwordRecovery) {
           debugPrint('✅ PASSWORD_RECOVERY event — showing ResetPasswordScreen');
           if (mounted) setState(() => _status = _AuthStatus.passwordRecovery);
           return;
         }
-
 
         if (event == AuthChangeEvent.signedIn) {
           debugPrint('🔍 SIGNED_IN event — checking if recovery URL...');
@@ -207,7 +187,6 @@ class _AuthGateState extends State<AuthGate> {
           await _resolveAuthenticatedStatus();
           return;
         }
-
 
         if (event == AuthChangeEvent.signedOut) {
           debugPrint('🔒 SIGNED_OUT — showing unauthenticated');
@@ -222,18 +201,15 @@ class _AuthGateState extends State<AuthGate> {
     );
   }
 
-
   Future<void> _resolveAuthenticatedStatus() async {
     final myCheckId = ++_checkId;
     final user = Supabase.instance.client.auth.currentUser;
     debugPrint('🔍 _resolveAuthenticatedStatus — user: ${user?.email ?? "null"}');
 
-
     if (user == null) {
       if (mounted) setState(() => _status = _AuthStatus.unauthenticated);
       return;
     }
-
 
     try {
       final profile = await Supabase.instance.client
@@ -243,13 +219,10 @@ class _AuthGateState extends State<AuthGate> {
           .maybeSingle()
           .timeout(const Duration(seconds: 10));
 
-
       if (!mounted || myCheckId != _checkId) return;
-
 
       final role = profile?['role'];
       debugPrint('🔍 Profile role: $role');
-
 
       if (role == null || (role as String).isEmpty) {
         setState(() => _status = _AuthStatus.needsRole);
@@ -263,11 +236,9 @@ class _AuthGateState extends State<AuthGate> {
     }
   }
 
-
   void _handleSignOut()       => setState(() => _status = _AuthStatus.unauthenticated);
   void _handleRoleSelected()  => setState(() => _status = _AuthStatus.authenticated);
   void _handleResetComplete() => setState(() => _status = _AuthStatus.unauthenticated);
-
 
   @override
   Widget build(BuildContext context) {
@@ -278,10 +249,8 @@ class _AuthGateState extends State<AuthGate> {
         _AuthStatus.loading =>
           const _SplashScreen(),
 
-
         _AuthStatus.unauthenticated =>
           const _AuthNavigator(),
-
 
         _AuthStatus.needsRole =>
           RoleSelectionScreen(
@@ -289,13 +258,11 @@ class _AuthGateState extends State<AuthGate> {
             onRoleSelected: _handleRoleSelected,
           ),
 
-
         _AuthStatus.authenticated =>
           MainShell(
             key:       const ValueKey('mainShell'),
             onSignOut: _handleSignOut,
           ),
-
 
         _AuthStatus.passwordRecovery =>
           ResetPasswordScreen(
@@ -307,11 +274,9 @@ class _AuthGateState extends State<AuthGate> {
   }
 }
 
-
 // ── Splash ────────────────────────────────────────────────────────────────────
 class _SplashScreen extends StatelessWidget {
   const _SplashScreen();
-
 
   @override
   Widget build(BuildContext context) {
@@ -324,19 +289,15 @@ class _SplashScreen extends StatelessWidget {
   }
 }
 
-
 // ── Auth navigator ────────────────────────────────────────────────────────────
 enum _AuthView { login, signup, signupOtp }
-
 
 class _AuthNavigator extends StatefulWidget {
   const _AuthNavigator();
 
-
   @override
   State<_AuthNavigator> createState() => _AuthNavigatorState();
 }
-
 
 class _AuthNavigatorState extends State<_AuthNavigator> {
   _AuthView _view       = _AuthView.login;
@@ -344,10 +305,8 @@ class _AuthNavigatorState extends State<_AuthNavigator> {
   String?   _otpFullName;
   String?   _otpStudentId;
 
-
   void _goToLogin()  => setState(() => _view = _AuthView.login);
   void _goToSignup() => setState(() => _view = _AuthView.signup);
-
 
   void _goToSignupOtp({
     required String email,
@@ -362,9 +321,7 @@ class _AuthNavigatorState extends State<_AuthNavigator> {
     });
   }
 
-
   void _onSignupVerified() {}
-
 
   @override
   Widget build(BuildContext context) {
@@ -372,13 +329,11 @@ class _AuthNavigatorState extends State<_AuthNavigator> {
       duration: const Duration(milliseconds: 250),
       child: switch (_view) {
 
-
         _AuthView.login => LoginScreen(
           key:        const ValueKey('login'),
           onLogin:    _onSignupVerified,
           onGoSignup: _goToSignup,
         ),
-
 
         _AuthView.signup => SignupScreen(
           key:       const ValueKey('signup'),
@@ -393,7 +348,6 @@ class _AuthNavigatorState extends State<_AuthNavigator> {
             studentId: studentId,
           ),
         ),
-
 
         _AuthView.signupOtp => OtpScreen(
           key:        const ValueKey('signupOtp'),
