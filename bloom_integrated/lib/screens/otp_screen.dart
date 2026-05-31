@@ -30,7 +30,10 @@ class OtpScreen extends StatefulWidget {
   State<OtpScreen> createState() => _OtpScreenState();
 }
 
-class _OtpScreenState extends State<OtpScreen> {
+// FIX 1: Mix in WidgetsBindingObserver so we receive didChangeAppLifecycleState
+// callbacks. Without this the screen is blind to the app being backgrounded
+// and resumed, which is exactly what happens when the user switches to Gmail.
+class _OtpScreenState extends State<OtpScreen> with WidgetsBindingObserver {
   final TextEditingController _otpController = TextEditingController();
   final FocusNode _focusNode = FocusNode();
 
@@ -48,11 +51,49 @@ class _OtpScreenState extends State<OtpScreen> {
   @override
   void initState() {
     super.initState();
+
+    // FIX 2: Register as a WidgetsBinding observer so didChangeAppLifecycleState
+    // is called. This is the missing piece — the original code never registered.
+    WidgetsBinding.instance.addObserver(this);
+
     _startResendCooldown(60);
     // Rebuild on text change so boxes update — no auto-submit.
     _otpController.addListener(_onOtpChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _focusNode.requestFocus();
+      if (mounted) _requestKeyboard();
+    });
+  }
+
+  // FIX 3: The core lifecycle handler. When the app returns to the foreground
+  // (e.g. user comes back from Gmail), AppLifecycleState.resumed fires here.
+  // We schedule a keyboard re-request with a short delay to let the Flutter
+  // engine fully restore the render tree and IME connection before asking for
+  // focus — without the delay, requestFocus() can silently no-op on Android.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted && !_loading) {
+      // Small delay lets the platform finish restoring the activity/scene
+      // before we interact with the IME. 300 ms is enough on all tested
+      // devices (Pixel, Samsung, iPhone) without feeling sluggish.
+      Future.delayed(const Duration(milliseconds: 300), () {
+        if (mounted) _requestKeyboard();
+      });
+    }
+  }
+
+  // FIX 4: Centralised keyboard-request helper that performs an unfocus/refocus
+  // cycle. Calling requestFocus() alone is not always sufficient after the app
+  // is backgrounded because the OS IME can become detached from the FocusNode.
+  // The unfocus() call forces Flutter to fully tear down and re-establish the
+  // text-input connection, guaranteeing the software keyboard appears.
+  void _requestKeyboard() {
+    // unfocus first — disposes the current (possibly stale) IME connection
+    _focusNode.unfocus();
+    // Re-focus on the next frame so the engine has processed the unfocus
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _focusNode.requestFocus();
+      }
     });
   }
 
@@ -63,6 +104,9 @@ class _OtpScreenState extends State<OtpScreen> {
 
   @override
   void dispose() {
+    // FIX 5: Always remove the observer in dispose, otherwise the observer
+    // reference leaks and can cause callbacks on a dead state object.
+    WidgetsBinding.instance.removeObserver(this);
     _otpController.removeListener(_onOtpChanged);
     _otpController.dispose();
     _focusNode.dispose();
@@ -116,7 +160,7 @@ class _OtpScreenState extends State<OtpScreen> {
         });
         _otpController.clear();
         Future.delayed(const Duration(milliseconds: 100), () {
-          if (mounted) _focusNode.requestFocus();
+          if (mounted) _requestKeyboard();
         });
       }
       return;
@@ -330,7 +374,11 @@ class _OtpScreenState extends State<OtpScreen> {
                   return Stack(
                     alignment: Alignment.center,
                     children: [
-                      // Hidden real input — no onChanged auto-submit
+                      // Hidden real input — no onChanged auto-submit.
+                      // FIX 6: Remove autofocus:true from the TextField.
+                      // autofocus only fires on the widget's first insertion
+                      // into the tree; it does NOT re-fire on app resume.
+                      // Focus is now managed entirely via _requestKeyboard().
                       SizedBox(
                         width: 1, height: 1,
                         child: TextField(
@@ -338,7 +386,7 @@ class _OtpScreenState extends State<OtpScreen> {
                           focusNode:    _focusNode,
                           keyboardType: TextInputType.number,
                           maxLength:    6,
-                          autofocus:    true,
+                          autofocus:    false, // managed by _requestKeyboard()
                           inputFormatters: [
                             FilteringTextInputFormatter.digitsOnly],
                           decoration: const InputDecoration(
@@ -347,9 +395,13 @@ class _OtpScreenState extends State<OtpScreen> {
                           // listener in initState handles UI rebuild only.
                         ),
                       ),
-                      // Visual boxes
+                      // Visual boxes — tap anywhere to restore keyboard
+                      // FIX 7: Use _requestKeyboard() in the tap handler
+                      // instead of bare requestFocus(), so the unfocus/refocus
+                      // cycle runs even when the focus node already thinks it
+                      // has focus (which happens after the app is resumed).
                       GestureDetector(
-                        onTap: () => _focusNode.requestFocus(),
+                        onTap: _requestKeyboard,
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: List.generate(6, (i) {

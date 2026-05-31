@@ -148,7 +148,7 @@ class _MainShellState extends State<MainShell> {
                   _NavItem(icon: Icons.home_outlined,           activeIcon: Icons.home_rounded,           label: 'Home',         index: 0, currentIndex: _currentIndex, onTap: _navigateTo),
                   _NavItem(icon: Icons.menu_book_outlined,      activeIcon: Icons.menu_book_rounded,      label: 'Library',      index: 1, currentIndex: _currentIndex, onTap: _navigateTo),
                   _NavItem(icon: Icons.calendar_today_outlined, activeIcon: Icons.calendar_today_rounded, label: 'Events',       index: 2, currentIndex: _currentIndex, onTap: _navigateTo),
-                  _NavItem(icon: Icons.emoji_events_outlined,   activeIcon: Icons.emoji_events_rounded,   label: 'Achievements', index: 3, currentIndex: _currentIndex, onTap: _navigateTo),
+                  _NavItem(icon: Icons.emoji_events_outlined,   activeIcon: Icons.emoji_events_rounded,   label: 'Achievement',  index: 3, currentIndex: _currentIndex, onTap: _navigateTo),
                   _NavItem(icon: Icons.person_outline_rounded,  activeIcon: Icons.person_rounded,         label: 'Profile',      index: 4, currentIndex: _currentIndex, onTap: _navigateTo),
                 ],
               ),

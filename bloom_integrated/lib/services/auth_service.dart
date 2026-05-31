@@ -61,6 +61,13 @@ class AuthService {
   }
 
   // ── Sign Up ────────────────────────────────────────────────────────
+  //
+  // Supabase silently returns HTTP 200 for duplicate signups when email
+  // confirmation is enabled — no AuthException is thrown. The response
+  // object is the only reliable signal: a genuine new account always has
+  // at least one entry in user.identities, while a duplicate signup returns
+  // an identities list that is empty []. This is Supabase's documented
+  // behaviour for detecting duplicate registrations on the client side.
   static Future<String?> signUp({
     required String email,
     required String password,
@@ -71,18 +78,33 @@ class AuthService {
     final cleanFullName = AppValidators.sanitizeName(fullName);
 
     try {
-      await _supabase.auth.signUp(
+      final response = await _supabase.auth.signUp(
         email:    cleanEmail,
         password: password,
         data: {
           'full_name': cleanFullName,
         },
       );
+
+      // ── Duplicate email detection ──────────────────────────────────
+      // When email confirmations are ON, Supabase returns a fake-success
+      // response instead of an error. The tell is an empty identities list.
+      // A real new user always has identities.length >= 1.
+      final identities = response.user?.identities;
+      if (identities != null && identities.isEmpty) {
+        return 'This email is already associated with an existing account. '
+               'Please log in or use a different email address.';
+      }
+
       return null;
+
     } on AuthException catch (e) {
+      // Fallback for Supabase configs that DO throw on duplicates,
+      // and for any other auth-layer errors.
       final msg = e.message.toLowerCase();
       if (msg.contains('already registered') || msg.contains('already exists')) {
-        return 'An account with this email already exists. Try signing in.';
+        return 'This email is already associated with an existing account. '
+               'Please log in or use a different email address.';
       }
       if (msg.contains('password')) {
         return 'Password does not meet the requirements.';

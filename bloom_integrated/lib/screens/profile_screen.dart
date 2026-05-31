@@ -3,10 +3,10 @@
 
 import 'dart:async';
 import 'dart:typed_data';
-import 'dart:html' as html show FileUploadInputElement, FileReader, Event;
-import 'package:flutter/foundation.dart' show kIsWeb;
+// ✅ REMOVED: dart:html (web-only, crashes on Android/iOS)
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:image_picker/image_picker.dart'; // ✅ ADDED: works on mobile & web
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../theme/app_theme.dart';
 import '../models/models.dart';
@@ -103,39 +103,29 @@ String _fmtDate(String? iso) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  WEB-SAFE IMAGE PICKER
+//  ✅ CROSS-PLATFORM IMAGE PICKER (replaces dart:html _pickImageWeb)
+//  Works on Android, iOS, and Web via the image_picker package.
 // ─────────────────────────────────────────────────────────────────────────────
-Future<({Uint8List bytes, String mime, String ext})?> _pickImageWeb() {
-  final completer = Completer<({Uint8List bytes, String mime, String ext})?>();
-  final input = html.FileUploadInputElement()
-    ..accept = 'image/jpeg,image/png,image/webp'
-    ..click();
+Future<({Uint8List bytes, String mime, String ext})?> _pickImage() async {
+  final picker = ImagePicker();
+  final XFile? picked = await picker.pickImage(
+    source: ImageSource.gallery,
+    imageQuality: 85,
+  );
+  if (picked == null) return null;
 
-  input.onChange.listen((html.Event _) async {
-    final file = input.files?.first;
-    if (file == null) { completer.complete(null); return; }
-    final ext  = file.name.split('.').last.toLowerCase();
-    final mime = ext == 'png'  ? 'image/png'
-               : ext == 'webp' ? 'image/webp'
-               : 'image/jpeg';
-    if (!['jpg','jpeg','png','webp'].contains(ext)) {
-      completer.complete(null); return;
-    }
-    if (file.size > 2 * 1024 * 1024) {
-      completer.completeError('size'); return;
-    }
-    final reader = html.FileReader();
-    reader.readAsArrayBuffer(file);
-    await reader.onLoad.first;
-    completer.complete((
-      bytes: reader.result as Uint8List,
-      mime:  mime,
-      ext:   ext,
-    ));
-  });
+  final bytes = await picked.readAsBytes();
 
-  input.onAbort.listen((_) => completer.complete(null));
-  return completer.future;
+  if (bytes.lengthInBytes > 2 * 1024 * 1024) {
+    throw 'size'; // caller checks for this
+  }
+
+  final ext = picked.name.split('.').last.toLowerCase();
+  final mime = ext == 'png'  ? 'image/png'
+             : ext == 'webp' ? 'image/webp'
+             : 'image/jpeg';
+
+  return (bytes: bytes, mime: mime, ext: ext);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -217,7 +207,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _selectedRole == 'teacher' || _selectedRole == 'faculty';
   bool get _requiresDept     => _isStudent || _isTeacherFaculty;
 
-  // Returns true if any field differs from what's saved in the DB
   bool get _isDirty {
     final fullName   = _profileData?['full_name'] as String? ?? '';
     final parts      = fullName.trim().split(' ')
@@ -314,7 +303,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
-  // ── Avatar upload ──────────────────────────────────────────────────────────
+  // ── ✅ Avatar upload (cross-platform, no dart:html) ────────────────────────
   Future<void> _pickAndUploadAvatar() async {
     if (_uploadingAvatar) return;
 
@@ -322,31 +311,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
     String mime = 'image/jpeg';
     String ext  = 'jpg';
 
-    if (kIsWeb) {
-      try {
-        final result = await _pickImageWeb();
-        if (result == null) return;
-        bytes = result.bytes; mime = result.mime; ext = result.ext;
-      } catch (e) {
-        if (e == 'size' && mounted)
-          _showError('Image must be smaller than 2 MB.');
-        return;
-      }
-    } else {
-      try {
-        final picker = await _getMobilePicker();
-        if (picker == null) return;
-        bytes = picker.bytes; mime = picker.mime; ext = picker.ext;
-      } catch (_) {
-        _showError('Failed to pick image. Please try again.');
-        return;
-      }
+    try {
+      final result = await _pickImage(); // ✅ single method, works everywhere
+      if (result == null) return;
+      bytes = result.bytes;
+      mime  = result.mime;
+      ext   = result.ext;
+    } catch (e) {
+      if (e == 'size' && mounted)
+        _showError('Image must be smaller than 2 MB.');
+      return;
     }
 
     if (bytes == null) return;
-    if (bytes.lengthInBytes > 2 * 1024 * 1024) {
-      _showError('Image must be smaller than 2 MB.'); return;
-    }
 
     setState(() => _uploadingAvatar = true);
     try {
@@ -375,14 +352,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     } finally {
       if (mounted) setState(() => _uploadingAvatar = false);
     }
-  }
-
-  Future<({Uint8List bytes, String mime, String ext})?> _getMobilePicker()
-      async {
-    try {
-      final dynamic picker = _ImagePickerMobile();
-      return await picker.pick();
-    } catch (_) { return null; }
   }
 
   // ── Role change ────────────────────────────────────────────────────────────
@@ -475,7 +444,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   // ── Handle back from edit screen ───────────────────────────────────────────
   Future<void> _handleEditBack() async {
-    // Step 1: Block back if required fields are missing
     if (_isStudent) {
       final fnErr     = _validateName(_firstNameCtrl.text, 'First name');
       final lnErr     = _validateName(_lastNameCtrl.text,  'Last name');
@@ -513,13 +481,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
       }
     }
 
-    // Step 2: No required errors — check for unsaved changes
     if (!_isDirty) {
       setState(() => _editOpen = false);
       return;
     }
 
-    // Step 3: Has unsaved changes — confirm discard
     final action = await showDialog<String>(
       context: context,
       barrierDismissible: false,
@@ -560,7 +526,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
       await _load();
       setState(() => _editOpen = false);
     }
-    // 'keep' → do nothing, stay on edit screen
   }
 
   // ── Save profile ───────────────────────────────────────────────────────────
@@ -577,8 +542,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 fontWeight: FontWeight.w700, color: AppColors.textDark)),
         content: Text(
           'Are you sure you want to save your profile changes?',
-          style: GoogleFonts.poppins(
-              fontSize: 13, color: AppColors.textMid)),
+          style: GoogleFonts.poppins(fontSize: 13, color: AppColors.textMid)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -634,9 +598,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         payload['year_level'] = null;
       }
 
-      await _supabase.from('profiles')
-          .update(payload)
-          .eq('id', userId);
+      await _supabase.from('profiles').update(payload).eq('id', userId);
 
       await _load();
       if (mounted) {
@@ -662,8 +624,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 fontWeight: FontWeight.w700, color: AppColors.textDark)),
         content: Text(
           'Are you sure you want to sign out of BLOOM GADRC?',
-          style: GoogleFonts.poppins(
-              fontSize: 13, color: AppColors.textMid)),
+          style: GoogleFonts.poppins(fontSize: 13, color: AppColors.textMid)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -1318,14 +1279,6 @@ class _RequiredFieldsHint extends StatelessWidget {
               fontSize: 11, color: AppColors.primary, height: 1.4))),
     ]),
   );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  MOBILE IMAGE PICKER STUB
-// ─────────────────────────────────────────────────────────────────────────────
-class _ImagePickerMobile {
-  Future<({Uint8List bytes, String mime, String ext})?> pick() async =>
-      null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

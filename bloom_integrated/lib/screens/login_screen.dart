@@ -153,6 +153,7 @@ class _LoginScreenState extends State<LoginScreen> {
       // from the dashboard. This avoids the 401 caused by dynamic ports.
       await Supabase.instance.client.auth.resetPasswordForEmail(
         AppValidators.sanitize(email).toLowerCase(),
+        redirectTo: 'io.supabase.bloom://reset-callback',
       );
       if (mounted) _showResetSentDialog(email);
     } catch (_) {

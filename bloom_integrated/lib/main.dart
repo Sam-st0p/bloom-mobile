@@ -2,6 +2,7 @@
 // BLOOM GAD Mobile App — Main entry point + AuthGate
 
 import 'dart:async';
+import 'package:app_links/app_links.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -16,13 +17,13 @@ import 'screens/main_shell.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
- await Supabase.initialize(
-  url:     'https://vfpgzuehfebhawlidhsz.supabase.co',
-  anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZmcGd6dWVoZmViaGF3bGlkaHN6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMwMjk4ODMsImV4cCI6MjA4ODYwNTg4M30.ZzaOTYxShnwwLDMNH1uZKb59lYsB6pnNk1mPik2VRR0',
-  authOptions: const FlutterAuthClientOptions(
-    authFlowType: AuthFlowType.implicit,
-  ),
-);
+  await Supabase.initialize(
+    url:     'https://vfpgzuehfebhawlidhsz.supabase.co',
+    anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZmcGd6dWVoZmViaGF3bGlkaHN6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMwMjk4ODMsImV4cCI6MjA4ODYwNTg4M30.ZzaOTYxShnwwLDMNH1uZKb59lYsB6pnNk1mPik2VRR0',
+    authOptions: const FlutterAuthClientOptions(
+      authFlowType: AuthFlowType.implicit,
+    ),
+  );
   runApp(const BloomApp());
 }
 
@@ -52,10 +53,7 @@ enum _AuthStatus {
   passwordRecovery,
 }
 
-// ── Recovery URL detection ────────────────────────────────────────────────────
-// Supabase puts tokens in the hash fragment after verifying the recovery link:
-//   http://localhost:8080/#access_token=...&type=recovery
-// We check BOTH fragment and query params to be safe.
+// ── Recovery URL detection (web only) ────────────────────────────────────────
 bool _isRecoveryUrl() {
   if (!kIsWeb) return false;
 
@@ -63,8 +61,6 @@ bool _isRecoveryUrl() {
   debugPrint('🔍 FRAGMENT:  ${Uri.base.fragment}');
   debugPrint('🔍 QUERY:     ${Uri.base.queryParameters}');
 
-  // Implicit flow: token arrives in hash fragment
-  //   http://localhost:8080/#access_token=...&type=recovery
   final fragment = Uri.base.fragment;
   if (fragment.isNotEmpty) {
     final params = Uri.splitQueryString(fragment);
@@ -72,8 +68,6 @@ bool _isRecoveryUrl() {
     if (params['type'] == 'recovery') return true;
   }
 
-  // PKCE flow: code arrives as query param, type also in query
-  //   http://localhost:8080/?code=...&type=recovery  (some Supabase versions)
   final query = Uri.base.queryParameters;
   debugPrint('🔍 QUERY PARAMS: $query');
   if (query['type'] == 'recovery') return true;
@@ -90,29 +84,56 @@ class AuthGate extends StatefulWidget {
 }
 
 class _AuthGateState extends State<AuthGate> {
-  _AuthStatus         _status  = _AuthStatus.loading;
+  _AuthStatus         _status   = _AuthStatus.loading;
   StreamSubscription? _authSub;
-  int                 _checkId = 0;
+  StreamSubscription? _linkSub;  // ← new
+  int                 _checkId  = 0;
 
   @override
   void initState() {
     super.initState();
     _initAuth();
+    _initDeepLinks(); // ← new
   }
 
   @override
   void dispose() {
     _authSub?.cancel();
+    _linkSub?.cancel(); // ← new
     super.dispose();
+  }
+
+  // ── Deep link listener (mobile only) ─────────────────────────────────────
+  void _initDeepLinks() {
+    if (kIsWeb) return;
+    final appLinks = AppLinks();
+
+    // Handle deep link if app was opened from a cold start via link
+    appLinks.getInitialLink().then((uri) {
+      if (uri != null) {
+        debugPrint('🔗 Initial deep link: $uri');
+        _handleDeepLink(uri);
+      }
+    });
+
+    // Handle deep link while app is already running
+    _linkSub = appLinks.uriLinkStream.listen((uri) {
+      debugPrint('🔗 Deep link received: $uri');
+      _handleDeepLink(uri);
+    });
+  }
+
+  void _handleDeepLink(Uri uri) {
+    debugPrint('🔗 Handling deep link: $uri');
+    if (uri.host == 'reset-callback') {
+      debugPrint('✅ Reset callback deep link — showing ResetPasswordScreen');
+      if (mounted) setState(() => _status = _AuthStatus.passwordRecovery);
+    }
   }
 
   Future<void> _initAuth() async {
     debugPrint('🚀 _initAuth() called');
 
-    // ── Priority 1: Recovery URL check ──────────────────────────────────
-    // Must happen before ANYTHING else — before session check, before
-    // subscribing to auth events. The hash fragment is available immediately
-    // on page load, before Supabase processes it.
     if (_isRecoveryUrl()) {
       debugPrint('✅ Recovery URL detected in _initAuth — showing ResetPasswordScreen');
       if (mounted) setState(() => _status = _AuthStatus.passwordRecovery);
@@ -120,12 +141,8 @@ class _AuthGateState extends State<AuthGate> {
       return;
     }
 
-    // ── Priority 2: Subscribe first, THEN check session ─────────────────
-    // Subscribe before session check so we don't miss events that fire
-    // during the async gap between subscribe and session resolution.
     _subscribeToAuthEvents();
 
-    // ── Priority 3: Existing session check ──────────────────────────────
     final session = Supabase.instance.client.auth.currentSession;
     debugPrint('🔍 Existing session: ${session != null ? "YES (user: ${session.user.email})" : "NO"}');
 
@@ -142,19 +159,14 @@ class _AuthGateState extends State<AuthGate> {
         final event = data.event;
         debugPrint('🔔 AUTH EVENT: $event  |  user: ${data.session?.user.email ?? "none"}');
 
-        // Token refreshes never change routing
         if (event == AuthChangeEvent.tokenRefreshed) return;
 
-        // PASSWORD_RECOVERY fires on mobile (deep link)
         if (event == AuthChangeEvent.passwordRecovery) {
           debugPrint('✅ PASSWORD_RECOVERY event — showing ResetPasswordScreen');
           if (mounted) setState(() => _status = _AuthStatus.passwordRecovery);
           return;
         }
 
-        // On web, Supabase fires SIGNED_IN when it exchanges the recovery
-        // token from the URL hash. Re-check the URL to distinguish this
-        // from a normal login SIGNED_IN event.
         if (event == AuthChangeEvent.signedIn) {
           debugPrint('🔍 SIGNED_IN event — checking if recovery URL...');
           if (_isRecoveryUrl()) {
