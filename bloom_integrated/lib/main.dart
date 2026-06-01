@@ -119,7 +119,7 @@ class _AuthGateState extends State<AuthGate> {
           schema:   'public',
           table:    'profiles',
           filter:   PostgresChangeFilter(
-            type:   FilterType.eq,
+            type:   PostgresChangeFilterType.eq,
             column: 'id',
             value:  userId,
           ),
