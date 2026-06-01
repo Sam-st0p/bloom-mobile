@@ -27,8 +27,6 @@ Future<void> main() async {
     ),
   );
 
-  // Google Sign-In v7: must initialize once before runApp.
-  // serverClientId = Web Client ID from Google Cloud Console → Credentials.
   if (!kIsWeb) {
     await GoogleSignIn.instance.initialize(
       serverClientId: 'YOUR_WEB_CLIENT_ID.apps.googleusercontent.com',
@@ -62,28 +60,18 @@ enum _AuthStatus {
   needsRole,
   authenticated,
   passwordRecovery,
+  deactivated,      // ← NEW: account was deactivated while logged in
 }
 
 // ── Recovery URL detection (web only) ────────────────────────────────────────
 bool _isRecoveryUrl() {
   if (!kIsWeb) return false;
-
-  debugPrint('🔍 BASE URI:  ${Uri.base}');
-  debugPrint('🔍 FRAGMENT:  ${Uri.base.fragment}');
-  debugPrint('🔍 QUERY:     ${Uri.base.queryParameters}');
-
   final fragment = Uri.base.fragment;
   if (fragment.isNotEmpty) {
     final params = Uri.splitQueryString(fragment);
-    debugPrint('🔍 FRAGMENT PARAMS: $params');
     if (params['type'] == 'recovery') return true;
   }
-
-  final query = Uri.base.queryParameters;
-  debugPrint('🔍 QUERY PARAMS: $query');
-  if (query['type'] == 'recovery') return true;
-
-  return false;
+  return Uri.base.queryParameters['type'] == 'recovery';
 }
 
 // ── AuthGate ──────────────────────────────────────────────────────────────────
@@ -98,7 +86,11 @@ class _AuthGateState extends State<AuthGate> {
   _AuthStatus         _status  = _AuthStatus.loading;
   StreamSubscription? _authSub;
   StreamSubscription? _linkSub;
+  RealtimeChannel?    _profileChannel;   // ← NEW
+  Timer?              _pollTimer;        // ← NEW
   int                 _checkId = 0;
+
+  final _supabase = Supabase.instance.client;
 
   @override
   void initState() {
@@ -111,40 +103,94 @@ class _AuthGateState extends State<AuthGate> {
   void dispose() {
     _authSub?.cancel();
     _linkSub?.cancel();
+    _stopDeactivationWatcher();
     super.dispose();
+  }
+
+  // ── Realtime + polling watcher ────────────────────────────────────────────
+  void _startDeactivationWatcher(String userId) {
+    _stopDeactivationWatcher(); // tear down any existing watcher first
+
+    // 1. Supabase Realtime — instant detection
+    _profileChannel = _supabase
+        .channel('profile-deactivation-$userId')
+        .onPostgresChanges(
+          event:    PostgresChangeEvent.update,
+          schema:   'public',
+          table:    'profiles',
+          filter:   PostgresChangeFilter(
+            type:   FilterType.eq,
+            column: 'id',
+            value:  userId,
+          ),
+          callback: (payload) {
+            debugPrint('[Realtime] profiles UPDATE: ${payload.newRecord}');
+            final isActive = payload.newRecord['is_active'];
+            if (isActive == false) {
+              debugPrint('[Realtime] Account deactivated — forcing logout');
+              _handleDeactivated();
+            }
+          },
+        )
+        .subscribe((status, [error]) {
+          debugPrint('[Realtime] subscription status: $status  error: $error');
+        });
+
+    // 2. Polling every 30 s — catches Realtime misses
+    _pollTimer = Timer.periodic(const Duration(seconds: 30), (_) async {
+      final user = _supabase.auth.currentUser;
+      if (user == null) return;
+      try {
+        final row = await _supabase
+            .from('profiles')
+            .select('is_active')
+            .eq('id', user.id)
+            .maybeSingle();
+        debugPrint('[Poll] is_active = ${row?['is_active']}');
+        if (row != null && row['is_active'] == false) {
+          debugPrint('[Poll] Account deactivated — forcing logout');
+          _handleDeactivated();
+        }
+      } catch (e) {
+        debugPrint('[Poll] error: $e');
+      }
+    });
+  }
+
+  void _stopDeactivationWatcher() {
+    _pollTimer?.cancel();
+    _pollTimer = null;
+    if (_profileChannel != null) {
+      _supabase.removeChannel(_profileChannel!);
+      _profileChannel = null;
+    }
+  }
+
+  // Called when deactivation is detected (Realtime or poll)
+  Future<void> _handleDeactivated() async {
+    _stopDeactivationWatcher();
+    try { await _supabase.auth.signOut(); } catch (_) {}
+    if (mounted) setState(() => _status = _AuthStatus.deactivated);
   }
 
   // ── Deep link listener (mobile only) ──────────────────────────────────────
   void _initDeepLinks() {
     if (kIsWeb) return;
     final appLinks = AppLinks();
-
     appLinks.getInitialLink().then((uri) {
-      if (uri != null) {
-        debugPrint('🔗 Initial deep link: $uri');
-        _handleDeepLink(uri);
-      }
+      if (uri != null) _handleDeepLink(uri);
     });
-
-    _linkSub = appLinks.uriLinkStream.listen((uri) {
-      debugPrint('🔗 Deep link received: $uri');
-      _handleDeepLink(uri);
-    });
+    _linkSub = appLinks.uriLinkStream.listen((uri) => _handleDeepLink(uri));
   }
 
   void _handleDeepLink(Uri uri) {
-    debugPrint('🔗 Handling deep link: $uri');
     if (uri.host == 'reset-callback') {
-      debugPrint('✅ Reset callback deep link — showing ResetPasswordScreen');
       if (mounted) setState(() => _status = _AuthStatus.passwordRecovery);
     }
   }
 
   Future<void> _initAuth() async {
-    debugPrint('🚀 _initAuth() called');
-
     if (_isRecoveryUrl()) {
-      debugPrint('✅ Recovery URL detected in _initAuth — showing ResetPasswordScreen');
       if (mounted) setState(() => _status = _AuthStatus.passwordRecovery);
       _subscribeToAuthEvents();
       return;
@@ -152,9 +198,7 @@ class _AuthGateState extends State<AuthGate> {
 
     _subscribeToAuthEvents();
 
-    final session = Supabase.instance.client.auth.currentSession;
-    debugPrint('🔍 Existing session: ${session != null ? "YES (user: ${session.user.email})" : "NO"}');
-
+    final session = _supabase.auth.currentSession;
     if (session != null) {
       await _resolveAuthenticatedStatus();
     } else {
@@ -163,39 +207,35 @@ class _AuthGateState extends State<AuthGate> {
   }
 
   void _subscribeToAuthEvents() {
-    _authSub = Supabase.instance.client.auth.onAuthStateChange.listen(
+    _authSub = _supabase.auth.onAuthStateChange.listen(
       (data) async {
         final event = data.event;
-        debugPrint('🔔 AUTH EVENT: $event  |  user: ${data.session?.user.email ?? "none"}');
+        debugPrint('AUTH EVENT: $event | user: ${data.session?.user.email ?? "none"}');
 
         if (event == AuthChangeEvent.tokenRefreshed) return;
 
         if (event == AuthChangeEvent.passwordRecovery) {
-          debugPrint('✅ PASSWORD_RECOVERY event — showing ResetPasswordScreen');
           if (mounted) setState(() => _status = _AuthStatus.passwordRecovery);
           return;
         }
 
         if (event == AuthChangeEvent.signedIn) {
-          debugPrint('🔍 SIGNED_IN event — checking if recovery URL...');
           if (_isRecoveryUrl()) {
-            debugPrint('✅ Recovery URL confirmed on SIGNED_IN — showing ResetPasswordScreen');
             if (mounted) setState(() => _status = _AuthStatus.passwordRecovery);
             return;
           }
-          debugPrint('ℹ️ Normal SIGNED_IN — resolving authenticated status');
           await _resolveAuthenticatedStatus();
           return;
         }
 
         if (event == AuthChangeEvent.signedOut) {
-          debugPrint('🔒 SIGNED_OUT — showing unauthenticated');
+          _stopDeactivationWatcher();
           if (mounted) setState(() => _status = _AuthStatus.unauthenticated);
           return;
         }
       },
       onError: (e) {
-        debugPrint('❌ Auth stream error: $e');
+        debugPrint('Auth stream error: $e');
         if (mounted) setState(() => _status = _AuthStatus.unauthenticated);
       },
     );
@@ -203,8 +243,7 @@ class _AuthGateState extends State<AuthGate> {
 
   Future<void> _resolveAuthenticatedStatus() async {
     final myCheckId = ++_checkId;
-    final user = Supabase.instance.client.auth.currentUser;
-    debugPrint('🔍 _resolveAuthenticatedStatus — user: ${user?.email ?? "null"}');
+    final user = _supabase.auth.currentUser;
 
     if (user == null) {
       if (mounted) setState(() => _status = _AuthStatus.unauthenticated);
@@ -212,37 +251,55 @@ class _AuthGateState extends State<AuthGate> {
     }
 
     try {
-      final profile = await Supabase.instance.client
+      // ── FIX: fetch BOTH role AND is_active ──────────────────────────
+      final profile = await _supabase
           .from('profiles')
-          .select('role')
+          .select('role, is_active')          // ← was 'role' only
           .eq('id', user.id)
           .maybeSingle()
           .timeout(const Duration(seconds: 10));
 
       if (!mounted || myCheckId != _checkId) return;
 
+      // ── FIX: block deactivated accounts immediately ─────────────────
+      if (profile != null && profile['is_active'] == false) {
+        debugPrint('Account is deactivated — signing out');
+        _stopDeactivationWatcher();
+        await _supabase.auth.signOut();
+        if (mounted) setState(() => _status = _AuthStatus.deactivated);
+        return;
+      }
+
       final role = profile?['role'];
-      debugPrint('🔍 Profile role: $role');
 
       if (role == null || (role as String).isEmpty) {
-        setState(() => _status = _AuthStatus.needsRole);
+        // Start watcher even for users who still need to pick a role
+        _startDeactivationWatcher(user.id);
+        if (mounted) setState(() => _status = _AuthStatus.needsRole);
       } else {
-        setState(() => _status = _AuthStatus.authenticated);
+        // ── FIX: start watcher when user is fully authenticated ────────
+        _startDeactivationWatcher(user.id);
+        if (mounted) setState(() => _status = _AuthStatus.authenticated);
       }
     } catch (e) {
-      debugPrint('❌ Profile fetch error: $e');
+      debugPrint('Profile fetch error: $e');
       if (!mounted || myCheckId != _checkId) return;
-      setState(() => _status = _AuthStatus.authenticated);
+      // On error, still start watcher if we have a user
+      _startDeactivationWatcher(user.id);
+      if (mounted) setState(() => _status = _AuthStatus.authenticated);
     }
   }
 
-  void _handleSignOut()       => setState(() => _status = _AuthStatus.unauthenticated);
+  void _handleSignOut() {
+    _stopDeactivationWatcher();
+    setState(() => _status = _AuthStatus.unauthenticated);
+  }
+
   void _handleRoleSelected()  => setState(() => _status = _AuthStatus.authenticated);
   void _handleResetComplete() => setState(() => _status = _AuthStatus.unauthenticated);
 
   @override
   Widget build(BuildContext context) {
-    debugPrint('🏗️  AuthGate build — status: $_status');
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 300),
       child: switch (_status) {
@@ -269,6 +326,13 @@ class _AuthGateState extends State<AuthGate> {
             key:        const ValueKey('resetPassword'),
             onComplete: _handleResetComplete,
           ),
+
+        // ── NEW: Deactivated screen ─────────────────────────────────
+        _AuthStatus.deactivated =>
+          _DeactivatedScreen(
+            key:     const ValueKey('deactivated'),
+            onClose: () => setState(() => _status = _AuthStatus.unauthenticated),
+          ),
       },
     );
   }
@@ -284,6 +348,89 @@ class _SplashScreen extends StatelessWidget {
       backgroundColor: AppColors.background,
       body: Center(
         child: CircularProgressIndicator(color: AppColors.primary),
+      ),
+    );
+  }
+}
+
+// ── Deactivated Screen ────────────────────────────────────────────────────────
+class _DeactivatedScreen extends StatelessWidget {
+  final VoidCallback onClose;
+  const _DeactivatedScreen({super.key, required this.onClose});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFFEF2F2),
+      body: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Icon
+                Container(
+                  width: 80, height: 80,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFEE2E2),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: const Icon(
+                    Icons.shield_outlined,
+                    size: 40,
+                    color: Color(0xFFDC2626),
+                  ),
+                ),
+                const SizedBox(height: 24),
+
+                // Title
+                const Text(
+                  'Account Deactivated',
+                  style: TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFF1A2E1A),
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 12),
+
+                // Message
+                const Text(
+                  'Your account has been deactivated by an administrator.\n\nPlease contact your administrator for assistance.',
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: Color(0xFF6B7280),
+                    height: 1.6,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 32),
+
+                // OK button
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: onClose,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFDC2626),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                    child: const Text(
+                      'OK',
+                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -328,13 +475,11 @@ class _AuthNavigatorState extends State<_AuthNavigator> {
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 250),
       child: switch (_view) {
-
         _AuthView.login => LoginScreen(
           key:        const ValueKey('login'),
           onLogin:    _onSignupVerified,
           onGoSignup: _goToSignup,
         ),
-
         _AuthView.signup => SignupScreen(
           key:       const ValueKey('signup'),
           onGoLogin: _goToLogin,
@@ -348,7 +493,6 @@ class _AuthNavigatorState extends State<_AuthNavigator> {
             studentId: studentId,
           ),
         ),
-
         _AuthView.signupOtp => OtpScreen(
           key:        const ValueKey('signupOtp'),
           email:      _otpEmail!,

@@ -19,7 +19,6 @@ class AuthService {
       await _supabase.auth.signOut(scope: SignOutScope.local);
       return null;
     } on AuthException catch (e) {
-      // Generic message — never reveal if email exists or not
       final msg = e.message.toLowerCase();
       if (msg.contains('invalid') || msg.contains('credentials') ||
           msg.contains('not found') || msg.contains('wrong')) {
@@ -34,14 +33,45 @@ class AuthService {
     }
   }
 
-  // ── Sign In (validates credentials then sends OTP) ─────────────────
+  // ── Sign In (validates credentials, checks is_active, then sends OTP) ──
   static Future<String?> signIn(String email, String password) async {
-    // Sanitize inputs
     final cleanEmail = AppValidators.normalizeEmail(email);
 
-    final error = await validateCredentials(cleanEmail, password);
-    if (error != null) return error;
+    // Step 1: validate credentials
+    final credError = await validateCredentials(cleanEmail, password);
+    if (credError != null) return credError;
 
+    // Step 2: check is_active BEFORE sending OTP
+    //         We need a temporary session to query the profile
+    try {
+      final authRes = await _supabase.auth.signInWithPassword(
+        email: cleanEmail, password: password);
+
+      final userId = authRes.user?.id;
+      if (userId == null) {
+        await _supabase.auth.signOut(scope: SignOutScope.local);
+        return 'Invalid email or password.';
+      }
+
+      final profile = await _supabase
+          .from('profiles')
+          .select('is_active')
+          .eq('id', userId)
+          .maybeSingle();
+
+      // Always destroy the temp session immediately
+      await _supabase.auth.signOut(scope: SignOutScope.local);
+
+      if (profile != null && profile['is_active'] == false) {
+        return 'Your account has been deactivated. Please contact an administrator for assistance.';
+      }
+    } catch (_) {
+      // If profile check fails, still destroy any temp session
+      try { await _supabase.auth.signOut(scope: SignOutScope.local); } catch (_) {}
+      // Fail open — let OTP proceed; AuthGate will catch it on resolve
+    }
+
+    // Step 3: send OTP
     try {
       await _supabase.auth.signInWithOtp(
         email:            cleanEmail,
@@ -74,9 +104,7 @@ class AuthService {
       await _supabase.auth.signUp(
         email:    cleanEmail,
         password: password,
-        data: {
-          'full_name': cleanFullName,
-        },
+        data: { 'full_name': cleanFullName },
       );
       return null;
     } on AuthException catch (e) {
@@ -84,12 +112,8 @@ class AuthService {
       if (msg.contains('already registered') || msg.contains('already exists')) {
         return 'An account with this email already exists. Try signing in.';
       }
-      if (msg.contains('password')) {
-        return 'Password does not meet the requirements.';
-      }
-      if (msg.contains('invalid email')) {
-        return 'Please enter a valid email address.';
-      }
+      if (msg.contains('password')) return 'Password does not meet the requirements.';
+      if (msg.contains('invalid email')) return 'Please enter a valid email address.';
       return 'Sign up failed. Please try again.';
     } catch (_) {
       return 'Sign up failed. Please try again.';
@@ -105,17 +129,14 @@ class AuthService {
     try {
       final user = _supabase.auth.currentUser;
       if (user == null) return;
-
       await _supabase.from('profiles').upsert({
         'id':        user.id,
         'full_name': AppValidators.sanitizeName(fullName),
         'email':     AppValidators.normalizeEmail(email),
         'is_active': true,
-        'role':      null, // role set separately in RoleSelectionScreen
+        'role':      null,
       }, onConflict: 'id', ignoreDuplicates: false);
-    } catch (_) {
-      // Non-blocking — AuthGate will handle routing via role check
-    }
+    } catch (_) {}
   }
 
   // ── Sign In with Google ────────────────────────────────────────────
@@ -133,10 +154,8 @@ class AuthService {
         return null;
       }
 
-      const webClientId =
-          '7383107443-fbiv7p4kb10voq9c88d8i0ccda6idejl.apps.googleusercontent.com';
-      const androidClientId =
-          '7383107443-9mnl4tqep7bu5vu2octrm69c58c6n1sq.apps.googleusercontent.com';
+      const webClientId     = '7383107443-fbiv7p4kb10voq9c88d8i0ccda6idejl.apps.googleusercontent.com';
+      const androidClientId = '7383107443-9mnl4tqep7bu5vu2octrm69c58c6n1sq.apps.googleusercontent.com';
 
       if (!_googleInitialized) {
         await GoogleSignIn.instance.initialize(
@@ -155,6 +174,20 @@ class AuthService {
         idToken:  idToken,
       );
 
+      // Check is_active after Google sign-in
+      final user = _supabase.auth.currentUser;
+      if (user != null) {
+        final profile = await _supabase
+            .from('profiles')
+            .select('is_active')
+            .eq('id', user.id)
+            .maybeSingle();
+        if (profile != null && profile['is_active'] == false) {
+          await _supabase.auth.signOut();
+          return 'Your account has been deactivated. Please contact an administrator for assistance.';
+        }
+      }
+
       await _ensureProfile();
       return null;
 
@@ -162,9 +195,7 @@ class AuthService {
       return e.message;
     } catch (e) {
       final msg = e.toString().toLowerCase();
-      if (msg.contains('cancel') || msg.contains('abort')) {
-        return 'Google sign-in cancelled.';
-      }
+      if (msg.contains('cancel') || msg.contains('abort')) return 'Google sign-in cancelled.';
       return 'Google sign-in failed. Please try again.';
     }
   }
@@ -174,13 +205,11 @@ class AuthService {
     try {
       final user = _supabase.auth.currentUser;
       if (user == null) return;
-
       final existing = await _supabase
           .from('profiles')
           .select('id, role')
           .eq('id', user.id)
           .maybeSingle();
-
       if (existing == null) {
         await _supabase.from('profiles').insert({
           'id':        user.id,
@@ -191,7 +220,6 @@ class AuthService {
           'role':      null,
         });
       }
-
       await updateLastSignIn();
     } catch (_) {}
   }
@@ -258,6 +286,6 @@ class AuthService {
   }
 
   // ── Helpers ────────────────────────────────────────────────────────
-  static User?              get currentUser       => _supabase.auth.currentUser;
-  static Stream<AuthState>  get authStateChanges  => _supabase.auth.onAuthStateChange;
+  static User?             get currentUser      => _supabase.auth.currentUser;
+  static Stream<AuthState> get authStateChanges => _supabase.auth.onAuthStateChange;
 }
