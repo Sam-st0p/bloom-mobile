@@ -1,4 +1,5 @@
 // lib/screens/events_screen.dart
+// this is the new
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -440,7 +441,7 @@ class _SeminarsTabState extends State<_SeminarsTab> {
     try {
       final sems = await _db
           .from('seminars')
-          .select('*, seminar_registrations(count)')
+          .select('*')
           .eq('is_public', true)
           .order('scheduled_start')
           .range(0, _pageSize - 1);
@@ -455,6 +456,7 @@ class _SeminarsTabState extends State<_SeminarsTab> {
           _loading  = false;
         });
       }
+      await _refreshCounts();   
     } catch (_) {
       if (mounted) setState(() => _loading = false);
     }
@@ -469,7 +471,7 @@ class _SeminarsTabState extends State<_SeminarsTab> {
       final to       = from + _pageSize - 1;
       final sems = await _db
           .from('seminars')
-          .select('*, seminar_registrations(count)')
+          .select('*')
           .eq('is_public', true)
           .order('scheduled_start')
           .range(from, to);
@@ -481,6 +483,7 @@ class _SeminarsTabState extends State<_SeminarsTab> {
           _hasMore     = list.length == _pageSize;
           _loadingMore = false;
         });
+        await _refreshCounts(); 
       }
     } catch (_) {
       if (mounted) setState(() => _loadingMore = false);
@@ -530,16 +533,6 @@ class _SeminarsTabState extends State<_SeminarsTab> {
         );
         return;
       }
-    }
-
-    if (!isReg && (status == 'completed' || status == 'cancelled')) return;
-
-    if (!isReg && !isOpen) {
-      _showSnack(
-        'Registration is closed — this seminar has already started.',
-        isError: true,
-      );
-      return;
     }
 
     final confirmed = await showDialog<bool>(
@@ -1180,6 +1173,9 @@ class _SeminarDetailScreenState extends State<SeminarDetailScreen> {
       comments:  _commentCtrl.text,
     );
 
+    // ADD THIS temporarily
+    debugPrint('submitEvaluation result: $err');
+
     if (!mounted) return;
 
     if (err == null) {
@@ -1394,30 +1390,36 @@ class _SeminarDetailScreenState extends State<SeminarDetailScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(children: [
-                  _TypeBadge(
-                    icon: type == 'in_person'
-                        ? Icons.location_on_outlined
-                        : type == 'hybrid'
-                            ? Icons.device_hub_outlined
-                            : Icons.videocam_outlined,
-                    text: type == 'in_person'
-                        ? 'In Person'
-                        : type == 'hybrid'
-                            ? 'Hybrid'
-                            : 'Webinar',
+                  Flexible(
+                    child: _TypeBadge(
+                      icon: type == 'in_person'
+                          ? Icons.location_on_outlined
+                          : type == 'hybrid'
+                              ? Icons.device_hub_outlined
+                              : Icons.videocam_outlined,
+                      text: type == 'in_person'
+                          ? 'In Person'
+                          : type == 'hybrid'
+                              ? 'Hybrid'
+                              : 'Webinar',
+                    ),
                   ),
                   const SizedBox(width: 8),
                   if (isReg)
-                    const _TypeBadge(
-                      icon: Icons.check_circle_outline,
-                      text: 'Registered',
-                      color: Color(0xFF16A34A),
+                    const Flexible(
+                      child: _TypeBadge(
+                        icon: Icons.check_circle_outline,
+                        text: 'Registered',
+                        color: Color(0xFF16A34A),
+                      ),
                     ),
                   if (!isReg && !isOpen && status == 'upcoming')
-                    const _TypeBadge(
-                      icon: Icons.lock_outline,
-                      text: 'Closed',
-                      color: Color(0xFFDC2626),
+                    const Flexible(
+                      child: _TypeBadge(
+                        icon: Icons.lock_outline,
+                        text: 'Closed',
+                        color: Color(0xFFDC2626),
+                      ),
                     ),
                 ]),
                 const SizedBox(height: 20),
@@ -2066,20 +2068,6 @@ class _CalendarTabState extends State<_CalendarTab> {
               final isOpen = _registrationOpen(raw);
               final status = _effectiveStatus(raw);
  
-              if (!isReg && (status == 'completed' || status == 'cancelled')) return;
-              if (!isReg && !isOpen) {
-                if (ctx.mounted) {
-                  ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
-                    content: Text(
-                      'Registration is closed — this seminar has already started.',
-                      style: GoogleFonts.nunito(),
-                    ),
-                    backgroundColor: AppColors.danger,
-                  ));
-                }
-                return;
-              }
- 
               final confirmed = await showDialog<bool>(
                 context: ctx,
                 builder: (dCtx) => AlertDialog(
@@ -2124,16 +2112,57 @@ class _CalendarTabState extends State<_CalendarTab> {
               );
  
               if (confirmed != true) return;
- 
-              if (isReg) {
-                final err = await DatabaseService.cancelRegistration(semId);
-                if (err == null) widget.regState.remove(semId);
-              } else {
-                final err = await DatabaseService.registerForSeminar(semId);
-                if (err == null || err == 'already_registered') {
-                  widget.regState.add(semId);
+                              // NEW — matches the full handling in _SeminarsTab
+                if (isReg) {
+                  final err = await DatabaseService.cancelRegistration(semId);
+                  if (err == null) {
+                    widget.regState.remove(semId);
+                  } else if (ctx.mounted) {
+                    ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
+                      content: Text('Failed to cancel registration. Please try again.',
+                          style: GoogleFonts.nunito()),
+                      backgroundColor: AppColors.danger,
+                    ));
+                  }
+                } else {
+                  final err = await DatabaseService.registerForSeminar(semId);
+                  switch (err) {
+                    case null:
+                      widget.regState.add(semId);
+                      break;
+                    case 'already_registered':
+                      widget.regState.add(semId);
+                      break;
+                    case 'seminar_full':
+                      if (ctx.mounted) {
+                        ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
+                          content: Text(
+                            'This seminar is already full. Registration is closed.',
+                            style: GoogleFonts.nunito()),
+                          backgroundColor: AppColors.danger,
+                        ));
+                      }
+                      break;
+                    case 'registration_closed':
+                      if (ctx.mounted) {
+                        ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
+                          content: Text(
+                            'Registration is closed — this seminar has already started.',
+                            style: GoogleFonts.nunito()),
+                          backgroundColor: AppColors.danger,
+                        ));
+                      }
+                      break;
+                    default:
+                      if (ctx.mounted) {
+                        ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
+                          content: Text('Registration failed. Please try again.',
+                              style: GoogleFonts.nunito()),
+                          backgroundColor: AppColors.danger,
+                        ));
+                      }
+                  }
                 }
-              }
             },
           ),
         ),

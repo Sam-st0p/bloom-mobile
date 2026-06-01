@@ -6,6 +6,7 @@ final _supabase = Supabase.instance.client;
 class DatabaseService {
 
   // ── MODULES ────────────────────────────────────────────────────────────────
+
   static Future<List<Map<String, dynamic>>> fetchModules() async {
     try {
       final data = await _supabase
@@ -46,6 +47,7 @@ class DatabaseService {
   }
 
   // ── SEMINARS ───────────────────────────────────────────────────────────────
+
   static Future<List<Map<String, dynamic>>> fetchSeminars() async {
     try {
       final data = await _supabase
@@ -63,197 +65,56 @@ class DatabaseService {
     return [];
   }
 
-  /// Register the current user for a seminar via atomic RPC.
+  // ── REGISTRATION ───────────────────────────────────────────────────────────
+
+  /// Atomically registers the current user for a seminar via the
+  /// [register_for_seminar] RPC, which enforces capacity limits with a
+  /// row-level lock and prevents race conditions.
   ///
-  /// The RPC (register_for_seminar) is the source of truth and enforces:
-  ///   • Capacity limit (max_participants) with a row-level lock
-  ///   • Registration deadline (cannot register after seminar starts)
-  ///   • Duplicate prevention
-  ///
-  /// This method falls back to a direct insert (with capacity check) if the
-  /// RPC is unavailable, preserving the profile snapshot behaviour.
-  ///
-  /// Returns null on success, or one of these error codes:
-  ///   'already_registered'  – user already has an active registration
-  ///   'seminar_full'        – max_participants has been reached
-  ///   'registration_closed' – seminar started / ended / cancelled
-  ///   'seminar_not_found'   – bad seminar ID
-  ///   'unauthenticated'     – no active session
-  ///   'error'               – unexpected server error
+  /// Returns:
+  ///   null                  → success
+  ///   'already_registered'  → user already has an active registration
+  ///   'seminar_full'        → max_participants reached
+  ///   'registration_closed' → seminar has started, ended, or was cancelled
+  ///   'seminar_not_found'   → invalid seminar ID
+  ///   'unauthenticated'     → no active session
+  ///   'error'               → unexpected server error
   static Future<String?> registerForSeminar(String seminarId) async {
     try {
       final userId = _supabase.auth.currentUser?.id;
       if (userId == null) return 'unauthenticated';
 
-      // ── 1. Try the atomic RPC first (handles capacity + race conditions) ──
-      try {
-        final rpcResult = await _supabase.rpc(
-          'register_for_seminar',
-          params: {'p_seminar_id': seminarId},
-        );
-        final code = rpcResult?.toString() ?? 'error';
+      final result = await _supabase.rpc(
+        'register_for_seminar',
+        params: {'p_seminar_id': seminarId},
+      );
 
-        // RPC succeeded — now patch in the profile snapshot if it was a
-        // fresh registration (the RPC inserts a bare row; we update it here).
-        if (code == 'ok') {
-          await _patchRegistrationSnapshot(userId, seminarId);
-          return null;
-        }
-
-        // RPC returned a known error code — surface it directly.
-        if (['already_registered', 'seminar_full', 'registration_closed',
-             'seminar_not_found', 'unauthenticated'].contains(code)) {
-          return code;
-        }
-
-        // Unknown code from RPC — fall through to legacy path
-      } on PostgrestException catch (rpcErr) {
-        // If the trigger fires and rejects a raw insert, surface seminar_full.
-        if (rpcErr.message.contains('seminar_full')) return 'seminar_full';
-        // Any other RPC error — fall through to legacy direct-insert path
+      final code = result?.toString() ?? 'error';
+      if (code == 'ok') {
+        await _patchRegistrationSnapshot(userId, seminarId);
+        return null;
       }
 
-      // ── 2. Legacy direct-insert path (used if RPC not yet deployed) ───────
-      return await _registerDirectly(userId, seminarId);
+      const knownCodes = {
+        'already_registered',
+        'seminar_full',
+        'registration_closed',
+        'seminar_not_found',
+        'unauthenticated',
+      };
+      return knownCodes.contains(code) ? code : 'error';
 
-    } catch (e) {
+    } on PostgrestException catch (e) {
+      return e.message.contains('seminar_full') ? 'seminar_full' : 'error';
+    } catch (_) {
       return 'error';
     }
   }
 
-  /// Patches the profile snapshot onto the registration row that the RPC
-  /// created. Called only after a successful RPC 'ok' response.
-  static Future<void> _patchRegistrationSnapshot(
-      String userId, String seminarId) async {
-    try {
-      final profile = await _supabase
-          .from('profiles')
-          .select('full_name, email, role, department, course, year_level')
-          .eq('id', userId)
-          .maybeSingle();
-
-      if (profile == null) return;
-
-      await _supabase
-          .from('seminar_registrations')
-          .update({
-            'full_name':  profile['full_name'],
-            'email':      profile['email'],
-            'role':       profile['role'],
-            'department': profile['department'],
-            'course':     profile['course'],
-            'year_level': profile['year_level'],
-          })
-          .eq('user_id', userId)
-          .eq('seminar_id', seminarId);
-    } catch (_) {
-      // Non-critical — registration already succeeded; snapshot is best-effort
-    }
-  }
-
-  /// Legacy direct-insert registration with manual capacity enforcement.
-  /// Used as fallback when the RPC has not yet been deployed to Supabase.
-  static Future<String?> _registerDirectly(
-      String userId, String seminarId) async {
-    // 1. Fetch seminar to enforce deadline + capacity
-    final seminar = await _supabase
-        .from('seminars')
-        .select('scheduled_start, status, max_participants')
-        .eq('id', seminarId)
-        .maybeSingle();
-
-    if (seminar == null) return 'seminar_not_found';
-
-    final dbStatus = seminar['status'] as String? ?? 'upcoming';
-    if (dbStatus == 'cancelled' || dbStatus == 'completed') {
-      return 'registration_closed';
-    }
-
-    final startIso = seminar['scheduled_start'] as String?;
-    if (startIso != null) {
-      try {
-        final utcStart = startIso.endsWith('Z') || startIso.contains('+')
-            ? startIso
-            : '${startIso}Z';
-        if (DateTime.now().isAfter(DateTime.parse(utcStart))) {
-          return 'registration_closed';
-        }
-      } catch (_) {}
-    }
-
-    // 2. Capacity check (non-atomic — RPC is preferred for race safety)
-    final maxP = seminar['max_participants'] as int?;
-    if (maxP != null) {
-      final countRes = await _supabase
-          .from('seminar_registrations')
-          .select('id')
-          .eq('seminar_id', seminarId)
-          .eq('status', 'registered')
-          .count(CountOption.exact);
-      if (countRes.count >= maxP) return 'seminar_full';
-    }
-
-    // 3. Fetch profile snapshot
-    final profile = await _supabase
-        .from('profiles')
-        .select('full_name, email, role, department, course, year_level')
-        .eq('id', userId)
-        .maybeSingle();
-
-    if (profile == null) return 'error';
-
-    // 4. Check for existing row (re-activation path)
-    final existing = await _supabase
-        .from('seminar_registrations')
-        .select('id, status')
-        .eq('user_id', userId)
-        .eq('seminar_id', seminarId)
-        .maybeSingle();
-
-    if (existing != null && existing['status'] == 'registered') {
-      return 'already_registered';
-    }
-
-    final now = DateTime.now().toUtc().toIso8601String();
-
-    if (existing != null) {
-      // Re-activate a previously cancelled registration
-      await _supabase
-          .from('seminar_registrations')
-          .update({
-            'status':        'registered',
-            'registered_at': now,
-            'full_name':     profile['full_name'],
-            'email':         profile['email'],
-            'role':          profile['role'],
-            'department':    profile['department'],
-            'course':        profile['course'],
-            'year_level':    profile['year_level'],
-          })
-          .eq('id', existing['id'] as String);
-    } else {
-      // Fresh registration with profile snapshot
-      await _supabase.from('seminar_registrations').insert({
-        'user_id':       userId,
-        'seminar_id':    seminarId,
-        'status':        'registered',
-        'registered_at': now,
-        'created_at':    now,
-        'full_name':     profile['full_name'],
-        'email':         profile['email'],
-        'role':          profile['role'],
-        'department':    profile['department'],
-        'course':        profile['course'],
-        'year_level':    profile['year_level'],
-      });
-    }
-
-    return null; // success
-  }
-
-  /// Cancel the current user's registration for a seminar.
-  /// Soft-delete: sets status to 'cancelled' rather than deleting the row,
-  /// preserving the profile snapshot and audit trail.
+  /// Soft-cancels the current user's registration (sets status → 'cancelled').
+  /// Preserves the profile snapshot and audit trail.
+  ///
+  /// Returns null on success, or an error string.
   static Future<String?> cancelRegistration(String seminarId) async {
     try {
       final userId = _supabase.auth.currentUser?.id;
@@ -271,7 +132,7 @@ class DatabaseService {
     }
   }
 
-  /// Returns true if the user is actively registered for a seminar.
+  /// Returns true if the current user has an active registration for [seminarId].
   static Future<bool> isRegistered(String seminarId) async {
     try {
       final userId = _supabase.auth.currentUser?.id;
@@ -289,8 +150,8 @@ class DatabaseService {
     }
   }
 
-  /// Returns the set of seminar IDs the user is actively registered for.
-  /// Reads directly from DB — never trusts local/cached state.
+  /// Returns the set of seminar IDs the current user is actively registered for.
+  /// Always reads from the DB — never trusts local or cached state.
   static Future<Set<String>> fetchMyRegisteredSeminarIds() async {
     try {
       final userId = _supabase.auth.currentUser?.id;
@@ -322,35 +183,16 @@ class DatabaseService {
 
   // ── EVALUATIONS ────────────────────────────────────────────────────────────
 
-  /// Verifies registration eligibility directly from DB via RPC.
-  /// Used to gate the evaluation form before it is shown or submitted.
-  /// Returns true only when a confirmed registration row exists in the DB.
-  static Future<bool> checkEvaluationEligibility(String seminarId) async {
-    try {
-      // Try RPC first (deployed with the capacity fix SQL)
-      final result = await _supabase.rpc(
-        'check_evaluation_eligibility',
-        params: {'p_seminar_id': seminarId},
-      );
-      return result == true;
-    } on PostgrestException {
-      // RPC not yet deployed — fall back to direct query
-      return isRegistered(seminarId);
-    } catch (_) {
-      return false;
-    }
-  }
-
-  /// Submit a seminar evaluation via secure RPC when available,
-  /// falling back to the original direct-insert path with eligibility checks.
+  /// Submits a seminar evaluation via the [submit_seminar_evaluation] RPC,
+  /// which enforces registration eligibility and duplicate prevention server-side.
   ///
-  /// Enforces:
-  ///   • User must have been registered before seminar started
-  ///   • No duplicate evaluations
-  ///   • Score range 1–5
-  ///
-  /// Returns null on success, 'already_evaluated' if duplicate,
-  /// 'not_eligible' if user was not pre-registered, or error string.
+  /// Returns:
+  ///   null                → success
+  ///   'already_evaluated' → duplicate submission
+  ///   'not_eligible'      → user was not a registered participant
+  ///   'invalid_scores'    → one or more scores outside 1–5
+  ///   'unauthenticated'   → no active session
+  ///   'error'             → unexpected server error
   static Future<String?> submitEvaluation({
     required String seminarId,
     required Map<String, int> scores,
@@ -360,123 +202,39 @@ class DatabaseService {
       final userId = _supabase.auth.currentUser?.id;
       if (userId == null) return 'unauthenticated';
 
-      // ── Try the secure RPC first ──────────────────────────────────────────
-      try {
-        final rpcResult = await _supabase.rpc(
-          'submit_seminar_evaluation',
-          params: {
-            'p_seminar_id':       seminarId,
-            'p_q_content':        scores['q_content']      ?? 0,
-            'p_q_speaker':        scores['q_speaker']      ?? 0,
-            'p_q_organization':   scores['q_organization'] ?? 0,
-            'p_q_relevance':      scores['q_relevance']    ?? 0,
-            'p_q_materials':      scores['q_materials']    ?? 0,
-            'p_q_overall':        scores['q_overall']      ?? 0,
-            'p_comments': (comments?.trim().isEmpty ?? true)
-                ? null
-                : comments?.trim(),
-          },
-        );
+      final result = await _supabase.rpc(
+        'submit_seminar_evaluation',
+        params: {
+          'p_seminar_id':     seminarId,
+          'p_q_content':      scores['q_content']      ?? 0,
+          'p_q_speaker':      scores['q_speaker']      ?? 0,
+          'p_q_organization': scores['q_organization'] ?? 0,
+          'p_q_relevance':    scores['q_relevance']    ?? 0,
+          'p_q_materials':    scores['q_materials']    ?? 0,
+          'p_q_overall':      scores['q_overall']      ?? 0,
+          'p_comments':       comments?.trim() ?? '',
+        },
+      );
 
-        final code = rpcResult?.toString() ?? 'error';
-        if (code == 'ok') return null;
+      final code = result?.toString() ?? 'error';
+      if (code == 'ok') return null;
 
-        if (['already_evaluated', 'not_eligible',
-             'invalid_scores', 'unauthenticated'].contains(code)) {
-          return code;
-        }
-
-        // Unknown code — fall through to legacy path
-      } on PostgrestException {
-        // RPC not yet deployed — fall through
-      }
-
-      // ── Legacy direct-insert path ─────────────────────────────────────────
-
-      // 1. Verify registration eligibility:
-      //    user must have registered BEFORE seminar started
-      final seminar = await _supabase
-          .from('seminars')
-          .select('scheduled_start')
-          .eq('id', seminarId)
-          .maybeSingle();
-
-      final startIso = seminar?['scheduled_start'] as String?;
-      if (startIso != null) {
-        try {
-          final utcStart = startIso.endsWith('Z') || startIso.contains('+')
-              ? startIso
-              : '${startIso}Z';
-          final startTime = DateTime.parse(utcStart);
-
-          final reg = await _supabase
-              .from('seminar_registrations')
-              .select('registered_at, status')
-              .eq('user_id', userId)
-              .eq('seminar_id', seminarId)
-              .maybeSingle();
-
-          if (reg == null) return 'not_eligible';
-
-          final regAtIso = reg['registered_at'] as String?;
-          if (regAtIso != null) {
-            final utcRegAt = regAtIso.endsWith('Z') || regAtIso.contains('+')
-                ? regAtIso
-                : '${regAtIso}Z';
-            final regAt = DateTime.parse(utcRegAt);
-            if (regAt.isAfter(startTime)) return 'not_eligible';
-          }
-        } catch (_) {}
-      } else {
-        // No start time set — just check a registration row exists
-        final reg = await _supabase
-            .from('seminar_registrations')
-            .select('id')
-            .eq('user_id', userId)
-            .eq('seminar_id', seminarId)
-            .eq('status', 'registered')
-            .maybeSingle();
-        if (reg == null) return 'not_eligible';
-      }
-
-      // 2. Duplicate check
-      final existing = await _supabase
-          .from('seminar_evaluations')
-          .select('id')
-          .eq('user_id', userId)
-          .eq('seminar_id', seminarId)
-          .maybeSingle();
-
-      if (existing != null) return 'already_evaluated';
-
-      // 3. Insert
-      await _supabase.from('seminar_evaluations').insert({
-        'seminar_id':     seminarId,
-        'user_id':        userId,
-        'q_content':      scores['q_content'],
-        'q_speaker':      scores['q_speaker'],
-        'q_organization': scores['q_organization'],
-        'q_relevance':    scores['q_relevance'],
-        'q_materials':    scores['q_materials'],
-        'q_overall':      scores['q_overall'],
-        'rating':         scores['q_overall'],
-        'comments': (comments?.trim().isEmpty ?? true)
-            ? null
-            : comments?.trim(),
-        'submitted_at': DateTime.now().toUtc().toIso8601String(),
-      });
-
-      return null;
+      const knownCodes = {
+        'already_evaluated',
+        'not_eligible',
+        'invalid_scores',
+        'unauthenticated',
+      };
+      return knownCodes.contains(code) ? code : 'error';
 
     } on PostgrestException catch (e) {
-      if (e.code == '23505') return 'already_evaluated';
-      return e.message;
+      return e.code == '23505' ? 'already_evaluated' : e.message;
     } catch (e) {
       return e.toString();
     }
   }
 
-  /// Returns true if the user has already evaluated a seminar.
+  /// Returns true if the current user has already evaluated [seminarId].
   static Future<bool> hasEvaluated(String seminarId) async {
     try {
       final userId = _supabase.auth.currentUser?.id;
@@ -494,6 +252,7 @@ class DatabaseService {
   }
 
   // ── EVENTS ─────────────────────────────────────────────────────────────────
+
   static Future<List<Map<String, dynamic>>> fetchEvents() async {
     try {
       final data = await _supabase.from('events').select('*');
@@ -503,6 +262,7 @@ class DatabaseService {
   }
 
   // ── BADGES ─────────────────────────────────────────────────────────────────
+
   static Future<List<Map<String, dynamic>>> fetchBadges() async {
     try {
       final data = await _supabase.from('badges').select('*');
@@ -527,6 +287,7 @@ class DatabaseService {
   }
 
   // ── CERTIFICATES ───────────────────────────────────────────────────────────
+
   static Future<List<Map<String, dynamic>>> fetchMyCertificates() async {
     try {
       final userId = _supabase.auth.currentUser?.id;
@@ -542,6 +303,7 @@ class DatabaseService {
   }
 
   // ── ANNOUNCEMENTS ──────────────────────────────────────────────────────────
+
   static Future<List<Map<String, dynamic>>> fetchAnnouncements() async {
     try {
       final data = await _supabase
@@ -556,6 +318,7 @@ class DatabaseService {
   }
 
   // ── PROFILE ────────────────────────────────────────────────────────────────
+
   static Future<Map<String, dynamic>?> fetchMyProfile() async {
     try {
       final userId = _supabase.auth.currentUser?.id;
@@ -575,6 +338,34 @@ class DatabaseService {
       final userId = _supabase.auth.currentUser?.id;
       if (userId == null) return;
       await _supabase.from('profiles').update(updates).eq('id', userId);
+    } catch (_) {}
+  }
+
+  // ── PRIVATE HELPERS ────────────────────────────────────────────────────────
+
+  /// Updates the profile snapshot on the registration row created by the RPC.
+  /// Non-critical: registration has already succeeded before this is called.
+  static Future<void> _patchRegistrationSnapshot(
+      String userId, String seminarId) async {
+    try {
+      final profile = await _supabase
+          .from('profiles')
+          .select('full_name, email, role, department, course, year_level')
+          .eq('id', userId)
+          .maybeSingle();
+      if (profile == null) return;
+      await _supabase
+          .from('seminar_registrations')
+          .update({
+            'full_name':  profile['full_name'],
+            'email':      profile['email'],
+            'role':       profile['role'],
+            'department': profile['department'],
+            'course':     profile['course'],
+            'year_level': profile['year_level'],
+          })
+          .eq('user_id', userId)
+          .eq('seminar_id', seminarId);
     } catch (_) {}
   }
 }
