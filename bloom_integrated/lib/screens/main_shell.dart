@@ -1,3 +1,5 @@
+// lib/screens/main_shell.dart
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
@@ -134,7 +136,7 @@ class _MainShellState extends State<MainShell> {
             border: const Border(top: BorderSide(color: AppColors.border)),
             boxShadow: [
               BoxShadow(
-                color:      Colors.black.withOpacity(0.05),
+                color:      Colors.black.withValues(alpha: 0.05),
                 blurRadius: 10,
                 offset:     const Offset(0, -4),
               ),

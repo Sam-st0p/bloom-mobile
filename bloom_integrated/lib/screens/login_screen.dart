@@ -7,16 +7,18 @@ import '../theme/app_theme.dart';
 import '../services/auth_service.dart';
 import '../utils/validators.dart';
 import '../utils/rate_limiter.dart';
-import 'otp_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   final VoidCallback onLogin;
   final VoidCallback onGoSignup;
+  /// Called after Google sign-in so the shell can skip role selection
+  final VoidCallback? onGuestLogin;
 
   const LoginScreen({
     super.key,
     required this.onLogin,
     required this.onGoSignup,
+    this.onGuestLogin,
   });
 
   @override
@@ -29,8 +31,6 @@ class _LoginScreenState extends State<LoginScreen> {
   bool    _obscurePass   = true;
   bool    _loading       = false;
   String? _error;
-  bool    _showOtp       = false;
-  String  _email         = '';
 
   int  _cooldownSeconds = 0;
   bool _isCoolingDown   = false;
@@ -41,6 +41,11 @@ class _LoginScreenState extends State<LoginScreen> {
     _passController.dispose();
     super.dispose();
   }
+
+  // ── Helpers ─────────────────────────────────────────────────────────────
+
+  bool get _isCvsuEmail =>
+      _emailController.text.trim().toLowerCase().endsWith('@cvsu.edu.ph');
 
   void _startCooldownTimer(int seconds) {
     setState(() { _cooldownSeconds = seconds; _isCoolingDown = true; });
@@ -56,6 +61,12 @@ class _LoginScreenState extends State<LoginScreen> {
     });
   }
 
+  // ── Email/password login — NO OTP step ───────────────────────────────────
+  //
+  // OTP was removed from login (kept only for signup) to stay within
+  // Resend's free email quota when scaling to 3000+ students.
+  // Email/password is already a secure factor on its own.
+
   Future<void> _handleLogin() async {
     setState(() => _error = null);
 
@@ -68,8 +79,16 @@ class _LoginScreenState extends State<LoginScreen> {
 
     final emailError = AppValidators.email(_emailController.text);
     if (emailError != null) { setState(() => _error = emailError); return; }
+
+    // Only allow @cvsu.edu.ph for email/password sign-in
+    if (!_isCvsuEmail) {
+      setState(() => _error = 'Only @cvsu.edu.ph emails can sign in here.\n'
+          'Use "Continue with Google" for other accounts.');
+      return;
+    }
+
     final passError = AppValidators.loginPassword(_passController.text);
-    if (passError != null)  { setState(() => _error = passError);  return; }
+    if (passError != null) { setState(() => _error = passError); return; }
 
     setState(() => _loading = true);
 
@@ -84,10 +103,7 @@ class _LoginScreenState extends State<LoginScreen> {
       final justLocked = RateLimiter.recordFailure(
           'login', maxAttempts: 6, cooldownSecs: 30);
       if (justLocked) {
-        setState(() {
-          _error   = 'Too many attempts. Please wait 30 seconds.';
-          _loading = false;
-        });
+        setState(() { _error = 'Too many attempts. Please wait 30 seconds.'; _loading = false; });
         _startCooldownTimer(30);
       } else {
         final used      = RateLimiter.attemptCount('login');
@@ -100,45 +116,59 @@ class _LoginScreenState extends State<LoginScreen> {
           _loading = false;
         });
       }
-    } else {
-      RateLimiter.reset('login');
-      setState(() {
-        _loading = false;
-        _email   = AppValidators.sanitize(_emailController.text).toLowerCase();
-        _showOtp = true;
-      });
+      return;
     }
+
+    // ── Success — straight to app, no OTP ──────────────────────────────
+    RateLimiter.reset('login');
+    try { await AuthService.updateLastSignIn(); } catch (_) {}
+    setState(() => _loading = false);
+    widget.onLogin();
   }
+
+  // ── Google sign-in → auto-assign guest ──────────────────────────────────
 
   Future<void> _handleGoogleSignIn() async {
     setState(() { _loading = true; _error = null; });
     try {
       final error = await AuthService.signInWithGoogle();
       if (!mounted) return;
-      if (error == null) {
-        widget.onLogin();
-      } else if (error != 'Google sign-in cancelled.') {
-        setState(() => _error = error);
+      if (error != null) {
+        if (error != 'Google sign-in cancelled.') setState(() => _error = error);
+        return;
       }
+
+      // Auto-assign guest role for Google users
+      final userId = Supabase.instance.client.auth.currentUser?.id;
+      if (userId != null) {
+        await Supabase.instance.client.from('profiles').upsert({
+          'id':         userId,
+          'role':       'guest',
+          'updated_at': DateTime.now().toIso8601String(),
+        }, onConflict: 'id');
+      }
+
+      (widget.onGuestLogin ?? widget.onLogin)();
     } finally {
       if (mounted) setState(() => _loading = false);
     }
   }
 
   // ── Forgot password ──────────────────────────────────────────────────────
-  // We do NOT pass redirectTo at all. Supabase will use the Site URL
-  // configured in the dashboard (Authentication → URL Configuration).
-  // Set your Site URL there to wherever your app runs, e.g. http://localhost:8080
-  // and always run with: flutter run -d chrome --web-port=8080
+
   Future<void> _handleForgotPassword() async {
     final email = _emailController.text.trim();
     if (email.isEmpty) {
-      setState(() =>
-          _error = 'Enter your email above, then tap Forgot Password.');
+      setState(() => _error = 'Enter your email above, then tap Forgot Password.');
       return;
     }
     final emailError = AppValidators.email(email);
     if (emailError != null) { setState(() => _error = emailError); return; }
+
+    if (!email.toLowerCase().endsWith('@cvsu.edu.ph')) {
+      setState(() => _error = 'Password reset is only available for @cvsu.edu.ph accounts.');
+      return;
+    }
 
     if (RateLimiter.isLocked('reset')) {
       setState(() => _error = 'Too many reset attempts. Please wait a minute.');
@@ -149,15 +179,12 @@ class _LoginScreenState extends State<LoginScreen> {
 
     setState(() { _loading = true; _error = null; });
     try {
-      // ✅ No redirectTo parameter at all — Supabase uses the Site URL
-      // from the dashboard. This avoids the 401 caused by dynamic ports.
       await Supabase.instance.client.auth.resetPasswordForEmail(
         AppValidators.sanitize(email).toLowerCase(),
         redirectTo: 'io.supabase.bloom://reset-callback',
       );
       if (mounted) _showResetSentDialog(email);
     } catch (_) {
-      // Always show success dialog — never reveal if an account exists
       if (mounted) _showResetSentDialog(email);
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -168,8 +195,7 @@ class _LoginScreenState extends State<LoginScreen> {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Row(children: [
           Container(
             padding: const EdgeInsets.all(8),
@@ -183,25 +209,20 @@ class _LoginScreenState extends State<LoginScreen> {
           const SizedBox(width: 10),
           Text('Check your email',
               style: GoogleFonts.nunito(
-                  fontWeight: FontWeight.w900,
-                  color: AppColors.textDark)),
+                  fontWeight: FontWeight.w900, color: AppColors.textDark)),
         ]),
         content: Text(
           'If an account exists for $email, a password reset link has been sent.\n\n'
           'Check your inbox and follow the link to reset your password.',
-          style: GoogleFonts.nunito(
-              fontSize: 14, color: AppColors.textMid, height: 1.5)),
+          style: GoogleFonts.nunito(fontSize: 14, color: AppColors.textMid, height: 1.5)),
         actions: [
           ElevatedButton(
             onPressed: () => Navigator.pop(context),
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.primary,
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12))),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
             child: Text('Got it',
-                style: GoogleFonts.nunito(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w800))),
+                style: GoogleFonts.nunito(color: Colors.white, fontWeight: FontWeight.w800))),
         ],
       ),
     );
@@ -211,31 +232,22 @@ class _LoginScreenState extends State<LoginScreen> {
     final r = raw.toLowerCase();
     if (r.contains('invalid_credentials')) return 'Incorrect email or password.';
     if (r.contains('invalid login'))       return 'Incorrect email or password.';
+    if (r.contains('email not confirmed')) return 'Please verify your email first. Check your inbox for the verification code.';
     if (r.contains('email not found'))     return 'No account found with this email.';
     if (r.contains('too many'))            return 'Too many attempts. Please wait and try again.';
     if (r.contains('network'))             return 'No internet connection. Please check your network.';
     return 'Incorrect email or password.';
   }
 
+  // ── Build ────────────────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
-    if (_showOtp) {
-      return OtpScreen(
-        email:      _email,
-        type:       'login',
-        onVerified: widget.onLogin,
-        onBack: () => setState(() {
-          _showOtp = false;
-          Supabase.instance.client.auth.signOut(scope: SignOutScope.local);
-        }),
-      );
-    }
-
     return Scaffold(
       backgroundColor: AppColors.background,
       body: Column(
         children: [
-          // ── Oval gradient header ───────────────────────────────────
+          // ── Oval gradient header ─────────────────────────────────────
           Container(
             width: double.infinity,
             decoration: const BoxDecoration(
@@ -256,29 +268,24 @@ class _LoginScreenState extends State<LoginScreen> {
                 decoration: BoxDecoration(
                   color: Colors.white.withOpacity(0.15),
                   borderRadius: BorderRadius.circular(24),
-                  border: Border.all(
-                      color: Colors.white.withOpacity(0.3), width: 1.5)),
+                  border: Border.all(color: Colors.white.withOpacity(0.3), width: 1.5)),
                 child: const Center(
-                  child: Icon(Icons.diversity_3_rounded,
-                      color: Colors.white, size: 38)),
+                  child: Icon(Icons.diversity_3_rounded, color: Colors.white, size: 38)),
               ),
               const SizedBox(height: 16),
               Text('GADRC CvSU',
                   style: GoogleFonts.nunito(
-                      color: Colors.white,
-                      fontSize: 26,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: -0.5)),
+                      color: Colors.white, fontSize: 26,
+                      fontWeight: FontWeight.w900, letterSpacing: -0.5)),
               const SizedBox(height: 6),
               Text('Gender & Development Resource Center',
                   style: GoogleFonts.nunito(
-                      color: Colors.white.withOpacity(0.75),
-                      fontSize: 13)),
+                      color: Colors.white.withOpacity(0.75), fontSize: 13)),
               const SizedBox(height: 8),
             ]),
           ),
 
-          // ── Form area ──────────────────────────────────────────────
+          // ── Form area ────────────────────────────────────────────────
           Expanded(
             child: SingleChildScrollView(
               padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
@@ -287,8 +294,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 children: [
                   Text('Welcome back!',
                       style: GoogleFonts.nunito(
-                          fontSize: 22,
-                          fontWeight: FontWeight.w900,
+                          fontSize: 22, fontWeight: FontWeight.w900,
                           color: AppColors.textDark)),
                   const SizedBox(height: 6),
                   Text('Sign in to continue your GAD journey',
@@ -296,22 +302,20 @@ class _LoginScreenState extends State<LoginScreen> {
                           fontSize: 13, color: AppColors.textLight)),
                   const SizedBox(height: 28),
 
-                  // ── Error / cooldown banner ──────────────────────
+                  // ── Error / cooldown banner ────────────────────────
                   if (_error != null) ...[
                     Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
                         color: AppColors.danger.withOpacity(0.08),
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                            color: AppColors.danger.withOpacity(0.3))),
+                        border: Border.all(color: AppColors.danger.withOpacity(0.3))),
                       child: Row(children: [
                         Icon(
                             _isCoolingDown
                                 ? Icons.timer_outlined
                                 : Icons.error_outline,
-                            color: AppColors.danger,
-                            size: 18),
+                            color: AppColors.danger, size: 18),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
@@ -326,34 +330,43 @@ class _LoginScreenState extends State<LoginScreen> {
                     const SizedBox(height: 16),
                   ],
 
-                  // ── Email ──────────────────────────────────────────
-                  _buildLabel('STUDENT EMAIL'),
+                  // ── Email ────────────────────────────────────────────
+                  _buildLabel('CVSU EMAIL'),
                   const SizedBox(height: 8),
                   TextField(
                     controller:   _emailController,
                     keyboardType: TextInputType.emailAddress,
-                    style: GoogleFonts.nunito(
-                        fontSize: 14, color: AppColors.textDark),
+                    onChanged:    (_) => setState(() {}), // rebuild suffix
+                    style: GoogleFonts.nunito(fontSize: 14, color: AppColors.textDark),
                     decoration: InputDecoration(
                       hintText:  'you@cvsu.edu.ph',
-                      hintStyle: GoogleFonts.nunito(
-                          color: AppColors.textLight),
+                      hintStyle: GoogleFonts.nunito(color: AppColors.textLight),
                       prefixIcon: const Icon(Icons.mail_outline,
-                          color: AppColors.textLight, size: 20))),
-                  const SizedBox(height: 16),
+                          color: AppColors.textLight, size: 20),
+                      suffixIcon: _isCvsuEmail
+                          ? const Icon(Icons.verified_outlined,
+                              color: Colors.green, size: 20)
+                          : null,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Use your @cvsu.edu.ph institutional email',
+                    style: GoogleFonts.nunito(
+                        fontSize: 11, color: AppColors.textLight),
+                  ),
+                  const SizedBox(height: 14),
 
-                  // ── Password ───────────────────────────────────────
+                  // ── Password ──────────────────────────────────────────
                   _buildLabel('PASSWORD'),
                   const SizedBox(height: 8),
                   TextField(
                     controller:  _passController,
                     obscureText: _obscurePass,
-                    style: GoogleFonts.nunito(
-                        fontSize: 14, color: AppColors.textDark),
+                    style: GoogleFonts.nunito(fontSize: 14, color: AppColors.textDark),
                     decoration: InputDecoration(
                       hintText:  '••••••••',
-                      hintStyle: GoogleFonts.nunito(
-                          color: AppColors.textLight),
+                      hintStyle: GoogleFonts.nunito(color: AppColors.textLight),
                       prefixIcon: const Icon(Icons.lock_outline,
                           color: AppColors.textLight, size: 20),
                       suffixIcon: IconButton(
@@ -362,16 +375,14 @@ class _LoginScreenState extends State<LoginScreen> {
                                 ? Icons.visibility_off_outlined
                                 : Icons.visibility_outlined,
                             color: AppColors.textLight, size: 20),
-                        onPressed: () => setState(
-                            () => _obscurePass = !_obscurePass)))),
+                        onPressed: () => setState(() => _obscurePass = !_obscurePass)))),
                   const SizedBox(height: 10),
 
-                  // ── Forgot password ────────────────────────────────
+                  // ── Forgot password ────────────────────────────────────
                   Align(
                     alignment: Alignment.centerRight,
                     child: TextButton(
-                      onPressed:
-                          _loading ? null : _handleForgotPassword,
+                      onPressed: _loading ? null : _handleForgotPassword,
                       child: Text('Forgot password?',
                           style: GoogleFonts.nunito(
                               color: AppColors.primary,
@@ -380,75 +391,59 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 8),
 
-                  // ── Sign In button ─────────────────────────────────
+                  // ── Sign In button — goes straight to app ──────────────
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
-                      onPressed: (_loading || _isCoolingDown)
-                          ? null
-                          : _handleLogin,
+                      onPressed: (_loading || _isCoolingDown) ? null : _handleLogin,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppColors.primary,
                         foregroundColor: Colors.white,
-                        disabledBackgroundColor:
-                            AppColors.primary.withOpacity(0.5),
+                        disabledBackgroundColor: AppColors.primary.withOpacity(0.5),
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(16)),
-                        padding:
-                            const EdgeInsets.symmetric(vertical: 16),
+                        padding: const EdgeInsets.symmetric(vertical: 16),
                         elevation: 4,
-                        shadowColor:
-                            AppColors.primary.withOpacity(0.4)),
+                        shadowColor: AppColors.primary.withOpacity(0.4)),
                       child: _loading
                           ? const SizedBox(
-                              height: 20,
-                              width: 20,
+                              height: 20, width: 20,
                               child: CircularProgressIndicator(
-                                  color: Colors.white,
-                                  strokeWidth: 2.5))
+                                  color: Colors.white, strokeWidth: 2.5))
                           : _isCoolingDown
                               ? Text('Wait $_cooldownSeconds s...',
                                   style: GoogleFonts.nunito(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w800))
+                                      fontSize: 16, fontWeight: FontWeight.w800))
                               : Text('Sign In',
                                   style: GoogleFonts.nunito(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w800)),
+                                      fontSize: 16, fontWeight: FontWeight.w800)),
                     ),
                   ),
                   const SizedBox(height: 24),
 
-                  // ── OR divider ─────────────────────────────────────
+                  // ── Divider ────────────────────────────────────────────
                   Row(children: [
                     const Expanded(child: Divider()),
                     Padding(
-                      padding:
-                          const EdgeInsets.symmetric(horizontal: 12),
-                      child: Text('or',
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      child: Text('or sign in as guest',
                           style: GoogleFonts.nunito(
-                              color: AppColors.textLight,
-                              fontSize: 13)),
+                              color: AppColors.textLight, fontSize: 13)),
                     ),
                     const Expanded(child: Divider()),
                   ]),
                   const SizedBox(height: 16),
 
-                  // ── Google Sign-In button ──────────────────────────
+                  // ── Google (Guest) button ──────────────────────────────
                   SizedBox(
                     width: double.infinity,
                     child: OutlinedButton(
-                      onPressed:
-                          _loading ? null : _handleGoogleSignIn,
+                      onPressed: _loading ? null : _handleGoogleSignIn,
                       style: OutlinedButton.styleFrom(
-                        padding:
-                            const EdgeInsets.symmetric(vertical: 14),
-                        side: BorderSide(
-                            color: AppColors.textLight
-                                .withOpacity(0.4)),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        side: BorderSide(color: AppColors.textLight.withOpacity(0.4)),
                         shape: RoundedRectangleBorder(
-                            borderRadius:
-                                BorderRadius.circular(16))),
+                            borderRadius: BorderRadius.circular(16))),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         mainAxisSize: MainAxisSize.min,
@@ -458,8 +453,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             decoration: BoxDecoration(
                               color: Colors.white,
                               borderRadius: BorderRadius.circular(4),
-                              border: Border.all(
-                                  color: Colors.grey.shade300)),
+                              border: Border.all(color: Colors.grey.shade300)),
                             child: const Center(
                               child: Text('G',
                                   style: TextStyle(
@@ -473,24 +467,46 @@ class _LoginScreenState extends State<LoginScreen> {
                                   fontSize: 15,
                                   fontWeight: FontWeight.w700,
                                   color: AppColors.textDark)),
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.grey.shade100,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text('Guest',
+                                style: GoogleFonts.nunito(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w700,
+                                    color: AppColors.textLight)),
+                          ),
                         ],
                       ),
                     ),
                   ),
+                  const SizedBox(height: 10),
+
+                  // Guest disclaimer
+                  Center(
+                    child: Text(
+                      'Google accounts are granted guest access only',
+                      style: GoogleFonts.nunito(
+                          fontSize: 11, color: AppColors.textLight),
+                    ),
+                  ),
                   const SizedBox(height: 24),
 
-                  // ── Sign up link ───────────────────────────────────
+                  // ── Sign up link ───────────────────────────────────────
                   Center(
                     child: GestureDetector(
                       onTap: widget.onGoSignup,
                       child: RichText(
                         text: TextSpan(
                           style: GoogleFonts.nunito(
-                              color: AppColors.textLight,
-                              fontSize: 13),
+                              color: AppColors.textLight, fontSize: 13),
                           children: [
-                            const TextSpan(
-                                text: "Don't have an account? "),
+                            const TextSpan(text: "Don't have an account? "),
                             TextSpan(
                                 text: 'Sign Up',
                                 style: GoogleFonts.nunito(

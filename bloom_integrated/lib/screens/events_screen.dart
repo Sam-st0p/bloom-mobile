@@ -800,7 +800,7 @@ class _SeminarsTabState extends State<_SeminarsTab> {
                 borderRadius: BorderRadius.circular(16),
                 boxShadow: [
                   BoxShadow(
-                      color: Colors.black.withOpacity(0.06),
+                      color: Colors.black.withValues(alpha: 0.06),
                       blurRadius: 8,
                       offset: const Offset(0, 2))
                 ],
@@ -852,7 +852,7 @@ class _SeminarsTabState extends State<_SeminarsTab> {
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 8, vertical: 3),
                               decoration: BoxDecoration(
-                                color: _statusColor(status).withOpacity(0.12),
+                                color: _statusColor(status).withValues(alpha: 0.12),
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: Text(
@@ -1299,7 +1299,7 @@ class _SeminarDetailScreenState extends State<SeminarDetailScreen> {
                       end: Alignment.bottomCenter,
                       colors: [
                         Colors.transparent,
-                        Colors.black.withOpacity(0.7)
+                        Colors.black.withValues(alpha: 0.7)
                       ],
                     ))),
                     Positioned(
@@ -1314,7 +1314,7 @@ class _SeminarDetailScreenState extends State<SeminarDetailScreen> {
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 10, vertical: 4),
                             decoration: BoxDecoration(
-                              color: _statusColor(status).withOpacity(0.9),
+                              color: _statusColor(status).withValues(alpha: 0.9),
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: Text(
@@ -1356,7 +1356,7 @@ class _SeminarDetailScreenState extends State<SeminarDetailScreen> {
                           padding: const EdgeInsets.symmetric(
                               horizontal: 10, vertical: 4),
                           decoration: BoxDecoration(
-                            color: _statusColor(status).withOpacity(0.9),
+                            color: _statusColor(status).withValues(alpha: 0.9),
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Text(
@@ -1470,7 +1470,7 @@ class _SeminarDetailScreenState extends State<SeminarDetailScreen> {
                       borderRadius: BorderRadius.circular(12),
                       boxShadow: [
                         BoxShadow(
-                            color: Colors.black.withOpacity(0.04),
+                            color: Colors.black.withValues(alpha: 0.04),
                             blurRadius: 6)
                       ],
                     ),
@@ -1674,7 +1674,7 @@ class _SeminarDetailScreenState extends State<SeminarDetailScreen> {
                         borderRadius: BorderRadius.circular(16),
                         boxShadow: [
                           BoxShadow(
-                              color: Colors.black.withOpacity(0.05),
+                              color: Colors.black.withValues(alpha: 0.05),
                               blurRadius: 8)
                         ],
                         border: Border.all(color: const Color(0xFFE8F2D8)),
@@ -2191,7 +2191,7 @@ class _CalendarTabState extends State<_CalendarTab> {
               width: double.infinity,
               padding: const EdgeInsets.fromLTRB(18, 18, 18, 14),
               decoration: BoxDecoration(
-                color: accentColor.withOpacity(0.1),
+                color: accentColor.withValues(alpha: 0.1),
                 borderRadius:
                     const BorderRadius.vertical(top: Radius.circular(16)),
               ),
@@ -2202,7 +2202,7 @@ class _CalendarTabState extends State<_CalendarTab> {
                     padding:
                         const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                     decoration: BoxDecoration(
-                      color: accentColor.withOpacity(0.15),
+                      color: accentColor.withValues(alpha: 0.15),
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: Text(
@@ -2353,7 +2353,7 @@ class _CalendarTabState extends State<_CalendarTab> {
                       padding: const EdgeInsets.symmetric(
                           horizontal: 10, vertical: 3),
                       decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.25),
+                        color: Colors.white.withValues(alpha: 0.25),
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Text(
@@ -2486,7 +2486,7 @@ class _CalendarTabState extends State<_CalendarTab> {
           border: Border(left: BorderSide(color: accentColor, width: 4)),
           boxShadow: [
             BoxShadow(
-                color: Colors.black.withOpacity(0.05),
+                color: Colors.black.withValues(alpha: 0.05),
                 blurRadius: 6,
                 offset: const Offset(0, 2)),
           ],
@@ -2513,7 +2513,7 @@ class _CalendarTabState extends State<_CalendarTab> {
                     padding: const EdgeInsets.symmetric(
                         horizontal: 8, vertical: 2),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF16A34A).withOpacity(0.1),
+                      color: const Color(0xFF16A34A).withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Text('Registered',
@@ -2549,7 +2549,7 @@ class _CalendarTabState extends State<_CalendarTab> {
                     padding: const EdgeInsets.symmetric(
                         horizontal: 8, vertical: 2),
                     decoration: BoxDecoration(
-                      color: accentColor.withOpacity(0.12),
+                      color: accentColor.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: Text(
@@ -2567,7 +2567,7 @@ class _CalendarTabState extends State<_CalendarTab> {
                       padding: const EdgeInsets.symmetric(
                           horizontal: 8, vertical: 2),
                       decoration: BoxDecoration(
-                        color: statusColor.withOpacity(0.12),
+                        color: statusColor.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text(
@@ -2684,7 +2684,7 @@ class _CalendarTabState extends State<_CalendarTab> {
             borderRadius: BorderRadius.circular(16),
             boxShadow: [
               BoxShadow(
-                  color: Colors.black.withOpacity(0.05), blurRadius: 8),
+                  color: Colors.black.withValues(alpha: 0.05), blurRadius: 8),
             ],
           ),
           child: Column(children: [
@@ -2784,7 +2784,7 @@ class _CalendarTabState extends State<_CalendarTab> {
                   );
                 } else if (isToday) {
                   cellDeco = BoxDecoration(
-                    color: AppColors.primary.withOpacity(0.1),
+                    color: AppColors.primary.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
                         color: AppColors.primary, width: 1.5),
@@ -2792,7 +2792,7 @@ class _CalendarTabState extends State<_CalendarTab> {
                 } else {
                   cellDeco = BoxDecoration(
                     color: hasEvents
-                        ? AppColors.primary.withOpacity(0.04)
+                        ? AppColors.primary.withValues(alpha: 0.04)
                         : null,
                     borderRadius: BorderRadius.circular(8),
                   );
@@ -2841,7 +2841,7 @@ class _CalendarTabState extends State<_CalendarTab> {
                                   // Dots are white when cell is selected,
                                   // else keep their event colour
                                   color: isSelected
-                                      ? Colors.white.withOpacity(0.85)
+                                      ? Colors.white.withValues(alpha: 0.85)
                                       : _itemColor(e),
                                   shape: BoxShape.circle,
                                 ),
@@ -2904,7 +2904,7 @@ class _CalendarTabState extends State<_CalendarTab> {
                       left: BorderSide(color: accentColor, width: 4)),
                   boxShadow: [
                     BoxShadow(
-                        color: Colors.black.withOpacity(0.04),
+                        color: Colors.black.withValues(alpha: 0.04),
                         blurRadius: 5),
                   ],
                 ),
@@ -2924,7 +2924,7 @@ class _CalendarTabState extends State<_CalendarTab> {
                           padding: const EdgeInsets.symmetric(
                               horizontal: 8, vertical: 2),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF16A34A).withOpacity(0.1),
+                            color: const Color(0xFF16A34A).withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Text('Registered',
@@ -2962,7 +2962,7 @@ class _CalendarTabState extends State<_CalendarTab> {
                       padding: const EdgeInsets.symmetric(
                           horizontal: 8, vertical: 2),
                       decoration: BoxDecoration(
-                        color: accentColor.withOpacity(0.12),
+                        color: accentColor.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text(
@@ -3034,7 +3034,7 @@ class _TypeBadge extends StatelessWidget {
   Widget build(BuildContext context) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
         decoration: BoxDecoration(
-          color: (color ?? AppColors.primary).withOpacity(0.1),
+          color: (color ?? AppColors.primary).withValues(alpha: 0.1),
           borderRadius: BorderRadius.circular(20),
         ),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
@@ -3061,7 +3061,7 @@ class _DetailCard extends StatelessWidget {
           borderRadius: BorderRadius.circular(14),
           boxShadow: [
             BoxShadow(
-                color: Colors.black.withOpacity(0.05), blurRadius: 8)
+                color: Colors.black.withValues(alpha: 0.05), blurRadius: 8)
           ],
         ),
         child: Column(children: children),

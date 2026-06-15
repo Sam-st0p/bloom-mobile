@@ -209,8 +209,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
   Future<void> _openFile(Map<String, dynamic> file) async {
     final url = file['file_url']?.toString();
     if (url == null || url.isEmpty) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('File URL not available.')));
+      }
       return;
     }
 
@@ -319,7 +321,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                           horizontal: 12, vertical: 7),
                       decoration: BoxDecoration(
                         color: _filters.hasActiveFilters
-                            ? AppColors.primary.withOpacity(0.1)
+                            ? AppColors.primary.withValues(alpha: 0.1)
                             : AppColors.background,
                         borderRadius: BorderRadius.circular(10),
                         border: Border.all(
@@ -656,13 +658,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     Row(children: [
                       BadgeChip(
                           label: module.category,
-                          color: Colors.white.withOpacity(0.3)),
+                          color: Colors.white.withValues(alpha: 0.3)),
                       const SizedBox(width: 8),
                       BadgeChip(
                           label: progress == 100
                               ? 'Completed'
                               : '$progress%',
-                          color: Colors.white.withOpacity(0.3)),
+                          color: Colors.white.withValues(alpha: 0.3)),
                       if (progress == 100) ...[
                         const SizedBox(width: 4),
                         const Icon(Icons.check_circle,
@@ -674,7 +676,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                       borderRadius: BorderRadius.circular(6),
                       child: LinearProgressIndicator(
                         value: progress / 100,
-                        backgroundColor: Colors.white.withOpacity(0.2),
+                        backgroundColor: Colors.white.withValues(alpha: 0.2),
                         valueColor: const AlwaysStoppedAnimation<Color>(
                             Colors.white),
                         minHeight: 6,
@@ -730,11 +732,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
                                 horizontal: 10, vertical: 3),
                             decoration: BoxDecoration(
                               color:
-                                  AppColors.primary.withOpacity(0.08),
+                                  AppColors.primary.withValues(alpha: 0.08),
                               borderRadius: BorderRadius.circular(12),
                               border: Border.all(
                                   color: AppColors.primary
-                                      .withOpacity(0.2)),
+                                      .withValues(alpha: 0.2)),
                             ),
                             child: Text('#$tag',
                                 style: GoogleFonts.nunito(
@@ -893,9 +895,9 @@ class _ActiveChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        color: AppColors.primary.withOpacity(0.1),
+        color: AppColors.primary.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppColors.primary.withOpacity(0.3)),
+        border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
       ),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         Text(label,
@@ -929,9 +931,9 @@ class _ActiveChipWithIcon extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        color: AppColors.primary.withOpacity(0.1),
+        color: AppColors.primary.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: AppColors.primary.withOpacity(0.3)),
+        border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
       ),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         Icon(icon, size: 13, color: AppColors.primary),
@@ -1165,7 +1167,7 @@ class _FilterSheetState extends State<_FilterSheet> {
                                   horizontal: 12, vertical: 10),
                               decoration: BoxDecoration(
                                 color: _local.dateFrom != null
-                                    ? AppColors.primary.withOpacity(0.08)
+                                    ? AppColors.primary.withValues(alpha: 0.08)
                                     : AppColors.background,
                                 borderRadius: BorderRadius.circular(10),
                                 border: Border.all(
@@ -1245,7 +1247,7 @@ class _FilterSheetState extends State<_FilterSheet> {
                                   horizontal: 12, vertical: 10),
                               decoration: BoxDecoration(
                                 color: _local.dateTo != null
-                                    ? AppColors.primary.withOpacity(0.08)
+                                    ? AppColors.primary.withValues(alpha: 0.08)
                                     : AppColors.background,
                                 borderRadius: BorderRadius.circular(10),
                                 border: Border.all(
@@ -1348,7 +1350,7 @@ class _SheetChip extends StatelessWidget {
             const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         decoration: BoxDecoration(
           color: selected
-              ? AppColors.primary.withOpacity(0.1)
+              ? AppColors.primary.withValues(alpha: 0.1)
               : AppColors.background,
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
@@ -1395,7 +1397,7 @@ class _ModuleCard extends StatelessWidget {
               width: 52,
               height: 52,
               decoration: BoxDecoration(
-                  color: color.withOpacity(0.15),
+                  color: color.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(14)),
               child: Icon(Icons.menu_book_outlined, color: color, size: 24),
             ),
@@ -1458,31 +1460,41 @@ class _FileTile extends StatelessWidget {
   IconData get _icon {
     final type = (file['file_type'] ?? '').toString().toLowerCase();
     final name = (file['file_name'] ?? '').toString().toLowerCase();
-    if (type.contains('pdf') || name.endsWith('.pdf'))
+    if (type.contains('pdf') || name.endsWith('.pdf')) {
       return Icons.picture_as_pdf_outlined;
-    if (type.contains('video') || name.endsWith('.mp4'))
+    }
+    if (type.contains('video') || name.endsWith('.mp4')) {
       return Icons.play_circle_outline;
+    }
     if (type.contains('image') ||
         name.endsWith('.png') ||
-        name.endsWith('.jpg')) return Icons.image_outlined;
-    if (name.endsWith('.pptx') || name.endsWith('.ppt'))
+        name.endsWith('.jpg')) {
+      return Icons.image_outlined;
+    }
+    if (name.endsWith('.pptx') || name.endsWith('.ppt')) {
       return Icons.slideshow_outlined;
-    if (name.endsWith('.docx') || name.endsWith('.doc'))
+    }
+    if (name.endsWith('.docx') || name.endsWith('.doc')) {
       return Icons.description_outlined;
+    }
     return Icons.insert_drive_file_outlined;
   }
 
   Color get _iconColor {
     final type = (file['file_type'] ?? '').toString().toLowerCase();
     final name = (file['file_name'] ?? '').toString().toLowerCase();
-    if (type.contains('pdf') || name.endsWith('.pdf'))
+    if (type.contains('pdf') || name.endsWith('.pdf')) {
       return Colors.red.shade400;
-    if (type.contains('video') || name.endsWith('.mp4'))
+    }
+    if (type.contains('video') || name.endsWith('.mp4')) {
       return Colors.blue.shade400;
-    if (name.endsWith('.pptx') || name.endsWith('.ppt'))
+    }
+    if (name.endsWith('.pptx') || name.endsWith('.ppt')) {
       return Colors.orange.shade400;
-    if (name.endsWith('.docx') || name.endsWith('.doc'))
+    }
+    if (name.endsWith('.docx') || name.endsWith('.doc')) {
       return Colors.blue.shade600;
+    }
     return AppColors.primary;
   }
 
@@ -1511,7 +1523,7 @@ class _FileTile extends StatelessWidget {
               width: 40,
               height: 40,
               decoration: BoxDecoration(
-                  color: _iconColor.withOpacity(0.12),
+                  color: _iconColor.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(10)),
               child: Icon(_icon, color: _iconColor, size: 20),
             ),
@@ -1537,7 +1549,7 @@ class _FileTile extends StatelessWidget {
               padding:
                   const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               decoration: BoxDecoration(
-                color: AppColors.primary.withOpacity(0.1),
+                color: AppColors.primary.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Row(children: [

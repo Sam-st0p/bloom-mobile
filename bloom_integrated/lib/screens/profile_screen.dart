@@ -69,8 +69,9 @@ String? _validateName(String? v, String field) {
   final t = v.trim();
   if (t.length < 2)  return '$field must be at least 2 characters.';
   if (t.length > 50) return '$field must be 50 characters or less.';
-  if (!RegExp(r"^[a-zA-ZÀ-ÿ\s'\-]+$").hasMatch(t))
+  if (!RegExp(r"^[a-zA-ZÀ-ÿ\s'\-]+$").hasMatch(t)) {
     return '$field may only contain letters, spaces, hyphens and apostrophes.';
+  }
   return null;
 }
 
@@ -79,8 +80,9 @@ String? _validateStudentId(String? v) {
   final t = v.trim();
   if (t.length < 5)  return 'Student ID must be at least 5 characters.';
   if (t.length > 20) return 'Student ID must be 20 characters or less.';
-  if (!RegExp(r'^[a-zA-Z0-9\-]+$').hasMatch(t))
+  if (!RegExp(r'^[a-zA-Z0-9\-]+$').hasMatch(t)) {
     return 'Student ID may only contain letters, numbers and hyphens.';
+  }
   return null;
 }
 
@@ -187,8 +189,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (_displayName.isEmpty) return '•';
     final parts = _displayName.split(' ')
         .where((p) => p.isNotEmpty).toList();
-    if (parts.length >= 2)
+    if (parts.length >= 2) {
       return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
+    }
     return _displayName[0].toUpperCase();
   }
 
@@ -316,12 +319,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
       mime  = result.mime;
       ext   = result.ext;
     } catch (e) {
-      if (e == 'size' && mounted)
+      if (e == 'size' && mounted) {
         _showError('Image must be smaller than 2 MB.');
+      }
       return;
     }
-
-    if (bytes == null) return;
 
     setState(() => _uploadingAvatar = true);
     try {
@@ -793,8 +795,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
       Container(
         width: size, height: size,
         color: forHeader
-            ? Colors.white.withOpacity(0.2)
-            : AppColors.primaryDark.withOpacity(0.12),
+            ? Colors.white.withValues(alpha: 0.2)
+            : AppColors.primaryDark.withValues(alpha: 0.12),
         child: Center(child: Text(_initials,
             style: TextStyle(
                 fontSize: size * 0.33,
@@ -833,7 +835,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       border: Border.all(
-                          color: Colors.white.withOpacity(0.5), width: 3),
+                          color: Colors.white.withValues(alpha: 0.5), width: 3),
                     ),
                     child: ClipOval(child: _buildAvatarView(96)),
                   ),
@@ -871,7 +873,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   const SizedBox(height: 4),
                   Text(_roleLabel,
                       style: GoogleFonts.poppins(
-                          color: Colors.white.withOpacity(0.8),
+                          color: Colors.white.withValues(alpha: 0.8),
                           fontSize: 13)),
                 ],
                 const SizedBox(height: 10),
@@ -1232,7 +1234,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.primaryDark,
                     disabledBackgroundColor:
-                        AppColors.primaryDark.withOpacity(0.4),
+                        AppColors.primaryDark.withValues(alpha: 0.4),
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(14)),
                     padding: const EdgeInsets.symmetric(vertical: 16),
@@ -1276,7 +1278,7 @@ class _RequiredFieldsHint extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.all(10),
     decoration: BoxDecoration(
-      color: AppColors.primary.withOpacity(0.06),
+      color: AppColors.primary.withValues(alpha: 0.06),
       borderRadius: BorderRadius.circular(8),
     ),
     child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -1315,7 +1317,7 @@ class _InfoPill extends StatelessWidget {
         : null,
     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
     decoration: BoxDecoration(
-      color: Colors.white.withOpacity(0.18),
+      color: Colors.white.withValues(alpha: 0.18),
       borderRadius: BorderRadius.circular(20),
     ),
     child: Row(mainAxisSize: MainAxisSize.min, children: [
@@ -1438,7 +1440,7 @@ class _DropdownField<T> extends StatelessWidget {
               color: AppColors.textDark)),
       const SizedBox(height: 6),
       DropdownButtonFormField<T>(
-        value: value,
+        initialValue: value,
         isExpanded: true,
         hint: Text(hint ?? 'Select',
             style: GoogleFonts.poppins(
@@ -1449,7 +1451,7 @@ class _DropdownField<T> extends StatelessWidget {
           prefixIcon: Icon(icon, color: AppColors.textLight, size: 18),
           filled:    true,
           fillColor: onChanged == null
-              ? AppColors.border.withOpacity(0.3)
+              ? AppColors.border.withValues(alpha: 0.3)
               : AppColors.background,
           contentPadding:
               const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -1543,7 +1545,7 @@ class _HorizontalSection extends StatelessWidget {
             padding: const EdgeInsets.symmetric(
                 horizontal: 8, vertical: 2),
             decoration: BoxDecoration(
-                color: AppColors.primary.withOpacity(0.1),
+                color: AppColors.primary.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(10)),
             child: Text('$count',
                 style: GoogleFonts.poppins(
@@ -1611,7 +1613,7 @@ class _CertPreviewCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: const Color(0xFFC8E6C9), width: 1.5),
         boxShadow: [BoxShadow(
-            color: Colors.black.withOpacity(0.06),
+            color: Colors.black.withValues(alpha: 0.06),
             blurRadius: 6, offset: const Offset(0, 2))],
       ),
       padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
@@ -1672,7 +1674,7 @@ class _BadgePreviewCard extends StatelessWidget {
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: const Color(0xFFFDE047), width: 1.5),
           boxShadow: [BoxShadow(
-              color: Colors.black.withOpacity(0.06),
+              color: Colors.black.withValues(alpha: 0.06),
               blurRadius: 6, offset: const Offset(0, 2))],
         ),
         padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),

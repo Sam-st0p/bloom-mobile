@@ -57,10 +57,10 @@ class BloomApp extends StatelessWidget {
 enum _AuthStatus {
   loading,
   unauthenticated,
-  needsRole,
+  needsRole,        // CvSU email user — must pick Student/Teacher/Faculty
   authenticated,
   passwordRecovery,
-  deactivated,      // ← NEW: account was deactivated while logged in
+  deactivated,
 }
 
 // ── Recovery URL detection (web only) ────────────────────────────────────────
@@ -86,8 +86,8 @@ class _AuthGateState extends State<AuthGate> {
   _AuthStatus         _status  = _AuthStatus.loading;
   StreamSubscription? _authSub;
   StreamSubscription? _linkSub;
-  RealtimeChannel?    _profileChannel;   // ← NEW
-  Timer?              _pollTimer;        // ← NEW
+  RealtimeChannel?    _profileChannel;
+  Timer?              _pollTimer;
   int                 _checkId = 0;
 
   final _supabase = Supabase.instance.client;
@@ -107,36 +107,28 @@ class _AuthGateState extends State<AuthGate> {
     super.dispose();
   }
 
-  // ── Realtime + polling watcher ────────────────────────────────────────────
+  // ── Realtime + polling deactivation watcher ───────────────────────────────
   void _startDeactivationWatcher(String userId) {
-    _stopDeactivationWatcher(); // tear down any existing watcher first
+    _stopDeactivationWatcher();
 
-    // 1. Supabase Realtime — instant detection
     _profileChannel = _supabase
         .channel('profile-deactivation-$userId')
         .onPostgresChanges(
-          event:    PostgresChangeEvent.update,
-          schema:   'public',
-          table:    'profiles',
-          filter:   PostgresChangeFilter(
+          event:  PostgresChangeEvent.update,
+          schema: 'public',
+          table:  'profiles',
+          filter: PostgresChangeFilter(
             type:   PostgresChangeFilterType.eq,
             column: 'id',
             value:  userId,
           ),
           callback: (payload) {
-            debugPrint('[Realtime] profiles UPDATE: ${payload.newRecord}');
             final isActive = payload.newRecord['is_active'];
-            if (isActive == false) {
-              debugPrint('[Realtime] Account deactivated — forcing logout');
-              _handleDeactivated();
-            }
+            if (isActive == false) _handleDeactivated();
           },
         )
-        .subscribe((status, [error]) {
-          debugPrint('[Realtime] subscription status: $status  error: $error');
-        });
+        .subscribe();
 
-    // 2. Polling every 30 s — catches Realtime misses
     _pollTimer = Timer.periodic(const Duration(seconds: 30), (_) async {
       final user = _supabase.auth.currentUser;
       if (user == null) return;
@@ -146,14 +138,8 @@ class _AuthGateState extends State<AuthGate> {
             .select('is_active')
             .eq('id', user.id)
             .maybeSingle();
-        debugPrint('[Poll] is_active = ${row?['is_active']}');
-        if (row != null && row['is_active'] == false) {
-          debugPrint('[Poll] Account deactivated — forcing logout');
-          _handleDeactivated();
-        }
-      } catch (e) {
-        debugPrint('[Poll] error: $e');
-      }
+        if (row != null && row['is_active'] == false) _handleDeactivated();
+      } catch (_) {}
     });
   }
 
@@ -166,21 +152,20 @@ class _AuthGateState extends State<AuthGate> {
     }
   }
 
-  // Called when deactivation is detected (Realtime or poll)
   Future<void> _handleDeactivated() async {
     _stopDeactivationWatcher();
     try { await _supabase.auth.signOut(); } catch (_) {}
     if (mounted) setState(() => _status = _AuthStatus.deactivated);
   }
 
-  // ── Deep link listener (mobile only) ──────────────────────────────────────
+  // ── Deep links (mobile only) ──────────────────────────────────────────────
   void _initDeepLinks() {
     if (kIsWeb) return;
     final appLinks = AppLinks();
     appLinks.getInitialLink().then((uri) {
       if (uri != null) _handleDeepLink(uri);
     });
-    _linkSub = appLinks.uriLinkStream.listen((uri) => _handleDeepLink(uri));
+    _linkSub = appLinks.uriLinkStream.listen(_handleDeepLink);
   }
 
   void _handleDeepLink(Uri uri) {
@@ -189,6 +174,7 @@ class _AuthGateState extends State<AuthGate> {
     }
   }
 
+  // ── Auth init ─────────────────────────────────────────────────────────────
   Future<void> _initAuth() async {
     if (_isRecoveryUrl()) {
       if (mounted) setState(() => _status = _AuthStatus.passwordRecovery);
@@ -210,7 +196,6 @@ class _AuthGateState extends State<AuthGate> {
     _authSub = _supabase.auth.onAuthStateChange.listen(
       (data) async {
         final event = data.event;
-        debugPrint('AUTH EVENT: $event | user: ${data.session?.user.email ?? "none"}');
 
         if (event == AuthChangeEvent.tokenRefreshed) return;
 
@@ -234,13 +219,20 @@ class _AuthGateState extends State<AuthGate> {
           return;
         }
       },
-      onError: (e) {
-        debugPrint('Auth stream error: $e');
+      onError: (_) {
         if (mounted) setState(() => _status = _AuthStatus.unauthenticated);
       },
     );
   }
 
+  // ── Resolve what screen to show after a successful sign-in ───────────────
+  //
+  // Rules:
+  //   • Deactivated           → _AuthStatus.deactivated
+  //   • role is null/empty    → _AuthStatus.needsRole   (CvSU users only)
+  //   • role == 'guest'       → _AuthStatus.authenticated (skip role screen)
+  //   • any other role set    → _AuthStatus.authenticated
+  //
   Future<void> _resolveAuthenticatedStatus() async {
     final myCheckId = ++_checkId;
     final user = _supabase.auth.currentUser;
@@ -251,51 +243,59 @@ class _AuthGateState extends State<AuthGate> {
     }
 
     try {
-      // ── FIX: fetch BOTH role AND is_active ──────────────────────────
       final profile = await _supabase
           .from('profiles')
-          .select('role, is_active')          // ← was 'role' only
+          .select('role, is_active')
           .eq('id', user.id)
           .maybeSingle()
           .timeout(const Duration(seconds: 10));
 
       if (!mounted || myCheckId != _checkId) return;
 
-      // ── FIX: block deactivated accounts immediately ─────────────────
+      // Block deactivated accounts immediately
       if (profile != null && profile['is_active'] == false) {
-        debugPrint('Account is deactivated — signing out');
         _stopDeactivationWatcher();
         await _supabase.auth.signOut();
         if (mounted) setState(() => _status = _AuthStatus.deactivated);
         return;
       }
 
-      final role = profile?['role'];
+      _startDeactivationWatcher(user.id);
 
-      if (role == null || (role as String).isEmpty) {
-        // Start watcher even for users who still need to pick a role
-        _startDeactivationWatcher(user.id);
+      final role = (profile?['role'] as String? ?? '').trim();
+
+      if (role.isEmpty) {
+        // CvSU email user who hasn't picked a role yet
         if (mounted) setState(() => _status = _AuthStatus.needsRole);
       } else {
-        // ── FIX: start watcher when user is fully authenticated ────────
-        _startDeactivationWatcher(user.id);
+        // Guest (Google) or any set role → go straight to app
         if (mounted) setState(() => _status = _AuthStatus.authenticated);
       }
-    } catch (e) {
-      debugPrint('Profile fetch error: $e');
+    } catch (_) {
       if (!mounted || myCheckId != _checkId) return;
-      // On error, still start watcher if we have a user
       _startDeactivationWatcher(user.id);
       if (mounted) setState(() => _status = _AuthStatus.authenticated);
     }
   }
 
-  void _handleSignOut() {
-    _stopDeactivationWatcher();
-    setState(() => _status = _AuthStatus.unauthenticated);
+  // ── Callbacks passed down to screens ─────────────────────────────────────
+
+  /// CvSU email login/signup verified via OTP → may still need role selection
+  void _handleOtpVerified() {
+    // _resolveAuthenticatedStatus will be triggered by the signedIn auth event
+    // automatically. Nothing needed here — AuthGate reacts on its own.
+  }
+
+  /// Google login or Google signup → role already set to 'guest', go to app
+  void _handleGuestAuth() {
+    setState(() => _status = _AuthStatus.authenticated);
   }
 
   void _handleRoleSelected()  => setState(() => _status = _AuthStatus.authenticated);
+  void _handleSignOut()       {
+    _stopDeactivationWatcher();
+    setState(() => _status = _AuthStatus.unauthenticated);
+  }
   void _handleResetComplete() => setState(() => _status = _AuthStatus.unauthenticated);
 
   @override
@@ -303,11 +303,16 @@ class _AuthGateState extends State<AuthGate> {
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 300),
       child: switch (_status) {
+
         _AuthStatus.loading =>
           const _SplashScreen(),
 
         _AuthStatus.unauthenticated =>
-          const _AuthNavigator(),
+          _AuthNavigator(
+            key:            const ValueKey('authNav'),
+            onGuestAuth:    _handleGuestAuth,
+            onOtpVerified:  _handleOtpVerified,
+          ),
 
         _AuthStatus.needsRole =>
           RoleSelectionScreen(
@@ -327,7 +332,6 @@ class _AuthGateState extends State<AuthGate> {
             onComplete: _handleResetComplete,
           ),
 
-        // ── NEW: Deactivated screen ─────────────────────────────────
         _AuthStatus.deactivated =>
           _DeactivatedScreen(
             key:     const ValueKey('deactivated'),
@@ -353,7 +357,7 @@ class _SplashScreen extends StatelessWidget {
   }
 }
 
-// ── Deactivated Screen ────────────────────────────────────────────────────────
+// ── Deactivated screen ────────────────────────────────────────────────────────
 class _DeactivatedScreen extends StatelessWidget {
   final VoidCallback onClose;
   const _DeactivatedScreen({super.key, required this.onClose});
@@ -369,7 +373,6 @@ class _DeactivatedScreen extends StatelessWidget {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Icon
                 Container(
                   width: 80, height: 80,
                   decoration: BoxDecoration(
@@ -378,37 +381,28 @@ class _DeactivatedScreen extends StatelessWidget {
                   ),
                   child: const Icon(
                     Icons.shield_outlined,
-                    size: 40,
-                    color: Color(0xFFDC2626),
+                    size: 40, color: Color(0xFFDC2626),
                   ),
                 ),
                 const SizedBox(height: 24),
-
-                // Title
                 const Text(
                   'Account Deactivated',
                   style: TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w800,
+                    fontSize: 22, fontWeight: FontWeight.w800,
                     color: Color(0xFF1A2E1A),
                   ),
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 12),
-
-                // Message
                 const Text(
-                  'Your account has been deactivated by an administrator.\n\nPlease contact your administrator for assistance.',
+                  'Your account has been deactivated by an administrator.\n\n'
+                  'Please contact your administrator for assistance.',
                   style: TextStyle(
-                    fontSize: 14,
-                    color: Color(0xFF6B7280),
-                    height: 1.6,
+                    fontSize: 14, color: Color(0xFF6B7280), height: 1.6,
                   ),
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 32),
-
-                // OK button
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
@@ -418,13 +412,11 @@ class _DeactivatedScreen extends StatelessWidget {
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
+                          borderRadius: BorderRadius.circular(10)),
                     ),
-                    child: const Text(
-                      'OK',
-                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
-                    ),
+                    child: const Text('OK',
+                        style: TextStyle(
+                            fontSize: 15, fontWeight: FontWeight.w700)),
                   ),
                 ),
               ],
@@ -440,17 +432,25 @@ class _DeactivatedScreen extends StatelessWidget {
 enum _AuthView { login, signup, signupOtp }
 
 class _AuthNavigator extends StatefulWidget {
-  const _AuthNavigator();
+  /// Fired when Google sign-in/up succeeds — goes straight to app (guest role)
+  final VoidCallback onGuestAuth;
+  /// Fired when OTP is verified — AuthGate's auth stream handles the rest
+  final VoidCallback onOtpVerified;
+
+  const _AuthNavigator({
+    super.key,
+    required this.onGuestAuth,
+    required this.onOtpVerified,
+  });
 
   @override
   State<_AuthNavigator> createState() => _AuthNavigatorState();
 }
 
 class _AuthNavigatorState extends State<_AuthNavigator> {
-  _AuthView _view       = _AuthView.login;
+  _AuthView _view      = _AuthView.login;
   String?   _otpEmail;
   String?   _otpFullName;
-  String?   _otpStudentId;
 
   void _goToLogin()  => setState(() => _view = _AuthView.login);
   void _goToSignup() => setState(() => _view = _AuthView.signup);
@@ -458,48 +458,46 @@ class _AuthNavigatorState extends State<_AuthNavigator> {
   void _goToSignupOtp({
     required String email,
     required String fullName,
-    String? studentId,
   }) {
     setState(() {
-      _otpEmail     = email;
-      _otpFullName  = fullName;
-      _otpStudentId = studentId ?? '';
-      _view         = _AuthView.signupOtp;
+      _otpEmail    = email;
+      _otpFullName = fullName;
+      _view        = _AuthView.signupOtp;
     });
   }
-
-  void _onSignupVerified() {}
 
   @override
   Widget build(BuildContext context) {
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 250),
       child: switch (_view) {
+
+        // ── Login ─────────────────────────────────────────────────────
+        // Email/password login no longer requires OTP — only signup does.
+        // onLogin fires immediately after AuthService.signIn() succeeds;
+        // AuthGate's onAuthStateChange (signedIn) then resolves the role.
         _AuthView.login => LoginScreen(
-          key:        const ValueKey('login'),
-          onLogin:    _onSignupVerified,
-          onGoSignup: _goToSignup,
+          key:          const ValueKey('login'),
+          onLogin:      widget.onOtpVerified,   // triggers AuthGate role check
+          onGuestLogin: widget.onGuestAuth,      // Google → straight to app
+          onGoSignup:   _goToSignup,
         ),
+
+        // ── Signup ────────────────────────────────────────────────────
         _AuthView.signup => SignupScreen(
-          key:       const ValueKey('signup'),
-          onGoLogin: _goToLogin,
-          onNeedsOtp: ({
-            required String email,
-            required String fullName,
-            String? studentId,
-          }) => _goToSignupOtp(
-            email:     email,
-            fullName:  fullName,
-            studentId: studentId,
-          ),
+          key:          const ValueKey('signup'),
+          onGoLogin:    _goToLogin,
+          onNeedsOtp:   ({required String email, required String fullName}) =>
+              _goToSignupOtp(email: email, fullName: fullName),
+          onGuestSignup: widget.onGuestAuth,     // Google → straight to app
         ),
+
+        // ── Signup OTP ────────────────────────────────────────────────
         _AuthView.signupOtp => OtpScreen(
           key:        const ValueKey('signupOtp'),
           email:      _otpEmail!,
-          type:       'signup',
-          fullName:   _otpFullName,
-          studentId:  _otpStudentId,
-          onVerified: _onSignupVerified,
+          fullName:   _otpFullName!,
+          onVerified: widget.onOtpVerified,      // → AuthGate resolves role
           onBack:     _goToSignup,
         ),
       },

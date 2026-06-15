@@ -90,7 +90,7 @@ class _HelpScreenState extends State<HelpScreen> {
                 onTap: () => Navigator.pop(context),
                 child: Container(
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.15),
+                    color: Colors.white.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(10),
                   ),
                   padding: const EdgeInsets.all(8),
@@ -104,10 +104,10 @@ class _HelpScreenState extends State<HelpScreen> {
               width: 60,
               height: 60,
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.15),
+                color: Colors.white.withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(18),
                 border: Border.all(
-                    color: Colors.white.withOpacity(0.3), width: 1.5),
+                    color: Colors.white.withValues(alpha: 0.3), width: 1.5),
               ),
               child: const Icon(Icons.help_outline_rounded,
                   color: Colors.white, size: 30),
@@ -121,7 +121,7 @@ class _HelpScreenState extends State<HelpScreen> {
             const SizedBox(height: 4),
             Text('BLOOM GADRC · CvSU Indang',
                 style: GoogleFonts.poppins(
-                    color: Colors.white.withOpacity(0.7), fontSize: 12)),
+                    color: Colors.white.withValues(alpha: 0.7), fontSize: 12)),
           ]),
         ),
 
@@ -325,7 +325,7 @@ class _ContactRow extends StatelessWidget {
           width: 40,
           height: 40,
           decoration: BoxDecoration(
-            color: AppColors.primaryDark.withOpacity(0.08),
+            color: AppColors.primaryDark.withValues(alpha: 0.08),
             borderRadius: BorderRadius.circular(10),
           ),
           child: Icon(icon, size: 20, color: AppColors.primaryDark),

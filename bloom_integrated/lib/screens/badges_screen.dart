@@ -179,7 +179,7 @@ class _StatPill extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.2),
+        color: Colors.white.withValues(alpha: 0.2),
         borderRadius: BorderRadius.circular(20),
       ),
       child: Row(
@@ -304,13 +304,13 @@ class _BadgeCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
     decoration: BoxDecoration(
-      color: earned ? Colors.white : Colors.white.withOpacity(0.6),
+      color: earned ? Colors.white : Colors.white.withValues(alpha: 0.6),
       borderRadius: BorderRadius.circular(14),
       border: Border.all(
           color: earned ? const Color(0xFFFDE047) : const Color(0xFFE5E7EB),
           width: earned ? 1.5 : 1),
       boxShadow: earned
-          ? [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 8)]
+          ? [BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 8)]
           : null,
     ),
     padding: const EdgeInsets.all(14),
@@ -400,7 +400,7 @@ class _CertsTab extends StatelessWidget {
               borderRadius: BorderRadius.circular(14),
               border: Border.all(color: const Color(0xFFC8E6C9), width: 1.5),
               boxShadow: [BoxShadow(
-                  color: Colors.black.withOpacity(0.07), blurRadius: 10,
+                  color: Colors.black.withValues(alpha: 0.07), blurRadius: 10,
                   offset: const Offset(0, 3))],
             ),
             child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -416,7 +416,7 @@ class _CertsTab extends StatelessWidget {
                   Container(
                     width: 36, height: 36,
                     decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.15),
+                        color: Colors.white.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(8)),
                     child: const Icon(Icons.workspace_premium_outlined,
                         color: Colors.white, size: 20)),
@@ -433,7 +433,7 @@ class _CertsTab extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                     decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.15),
+                        color: Colors.white.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(20)),
                     child: Text('VIEW',
                         style: GoogleFonts.nunito(
@@ -694,14 +694,14 @@ class CertificateCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: themeColor, width: 6),
         boxShadow: [BoxShadow(
-            color: Colors.black.withOpacity(0.25), blurRadius: 24,
+            color: Colors.black.withValues(alpha: 0.25), blurRadius: 24,
             offset: const Offset(0, 8))],
       ),
       child: Stack(children: [
         Positioned.fill(child: Padding(
           padding: const EdgeInsets.all(8),
           child: DecoratedBox(decoration: BoxDecoration(
-              border: Border.all(color: themeColor.withOpacity(0.2), width: 1),
+              border: Border.all(color: themeColor.withValues(alpha: 0.2), width: 1),
               borderRadius: BorderRadius.circular(4))),
         )),
         ..._corners(),
@@ -721,7 +721,7 @@ class CertificateCard extends StatelessWidget {
                     textAlign: TextAlign.center),
                 const SizedBox(height: 8),
                 Row(children: [
-                  Expanded(child: Divider(color: themeColor.withOpacity(0.4), thickness: 1)),
+                  Expanded(child: Divider(color: themeColor.withValues(alpha: 0.4), thickness: 1)),
                   Padding(padding: const EdgeInsets.symmetric(horizontal: 8),
                     child: Container(
                       width: 20, height: 20,
@@ -729,7 +729,7 @@ class CertificateCard extends StatelessWidget {
                           shape: BoxShape.circle,
                           border: Border.all(color: themeColor, width: 1.5)),
                       child: Icon(Icons.eco_outlined, size: 12, color: themeColor))),
-                  Expanded(child: Divider(color: themeColor.withOpacity(0.4), thickness: 1)),
+                  Expanded(child: Divider(color: themeColor.withValues(alpha: 0.4), thickness: 1)),
                 ]),
               ]),
               Column(children: [

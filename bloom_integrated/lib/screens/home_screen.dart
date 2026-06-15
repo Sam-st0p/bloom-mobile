@@ -155,9 +155,9 @@ class _HomeScreenState extends State<HomeScreen> {
                     children: [
                       Text(_greeting(),
                           style: GoogleFonts.nunito(
-                              color: Colors.white.withOpacity(0.7),
+                              color: Colors.white.withValues(alpha: 0.7),
                               fontSize: 13)),
-                      Text('$_firstName',
+                      Text(_firstName,
                           style: GoogleFonts.nunito(
                               color: Colors.white,
                               fontSize: 22,
@@ -168,7 +168,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ElevatedButton(
                     onPressed: widget.onBellTap,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.white.withOpacity(0.2),
+                      backgroundColor: Colors.white.withValues(alpha: 0.2),
                       shadowColor: Colors.transparent,
                       padding: const EdgeInsets.all(10),
                       minimumSize: const Size(44, 44),
@@ -278,12 +278,12 @@ class _HomeScreenState extends State<HomeScreen> {
                                   padding: const EdgeInsets.all(14),
                                   decoration: BoxDecoration(
                                     color: a['is_pinned'] == true
-                                        ? AppColors.primary.withOpacity(0.08)
+                                        ? AppColors.primary.withValues(alpha: 0.08)
                                         : Colors.white,
                                     borderRadius: BorderRadius.circular(14),
                                     border: Border.all(
                                         color: a['is_pinned'] == true
-                                            ? AppColors.primary.withOpacity(0.3)
+                                            ? AppColors.primary.withValues(alpha: 0.3)
                                             : AppColors.border),
                                   ),
                                   child: Row(
@@ -345,7 +345,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                           width: 48,
                                           height: 48,
                                           decoration: BoxDecoration(
-                                            color: AppColors.primary.withOpacity(0.15),
+                                            color: AppColors.primary.withValues(alpha: 0.15),
                                             borderRadius: BorderRadius.circular(14),
                                           ),
                                           child: const Icon(Icons.menu_book_outlined,
@@ -412,7 +412,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                       children: [
                                         Container(
                                           decoration: BoxDecoration(
-                                            color: Colors.white.withOpacity(0.25),
+                                            color: Colors.white.withValues(alpha: 0.25),
                                             borderRadius: BorderRadius.circular(10),
                                           ),
                                           padding: const EdgeInsets.symmetric(
@@ -435,7 +435,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                         const SizedBox(height: 6),
                                         Container(
                                           decoration: BoxDecoration(
-                                            color: Colors.white.withOpacity(0.2),
+                                            color: Colors.white.withValues(alpha: 0.2),
                                             borderRadius: BorderRadius.circular(20),
                                           ),
                                           padding: const EdgeInsets.symmetric(
@@ -506,7 +506,7 @@ class _StatBox extends StatelessWidget {
     return Expanded(
       child: Container(
         decoration: BoxDecoration(
-            color: color.withOpacity(0.1),
+            color: color.withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(14)),
         padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
         child: Column(children: [

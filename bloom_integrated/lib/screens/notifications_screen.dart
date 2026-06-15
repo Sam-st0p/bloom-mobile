@@ -219,7 +219,7 @@ class _NotificationsScreenState extends State<NotificationsScreen>
               Container(
                 width: 44, height: 44,
                 decoration: BoxDecoration(
-                  color: color.withOpacity(0.12),
+                  color: color.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Icon(_notifIcon(type), color: color, size: 22),
@@ -229,7 +229,7 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                 padding: const EdgeInsets.symmetric(
                     horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
-                  color: color.withOpacity(0.1),
+                  color: color.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Text(
@@ -416,13 +416,13 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                                       decoration: BoxDecoration(
                                         color: isRead
                                             ? Colors.white
-                                            : color.withOpacity(0.04),
+                                            : color.withValues(alpha: 0.04),
                                         borderRadius:
                                             BorderRadius.circular(14),
                                         border: Border.all(
                                           color: isRead
                                               ? AppColors.border
-                                              : color.withOpacity(0.25),
+                                              : color.withValues(alpha: 0.25),
                                           width: isRead ? 1 : 1.5,
                                         ),
                                         boxShadow: isRead
@@ -430,7 +430,7 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                                             : [
                                                 BoxShadow(
                                                   color: color
-                                                      .withOpacity(0.06),
+                                                      .withValues(alpha: 0.06),
                                                   blurRadius: 8,
                                                   offset:
                                                       const Offset(0, 2),
@@ -445,8 +445,8 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                                           Container(
                                             width: 42, height: 42,
                                             decoration: BoxDecoration(
-                                              color: color.withOpacity(
-                                                  isRead ? 0.08 : 0.15),
+                                              color: color.withValues(
+                                                  alpha: isRead ? 0.08 : 0.15),
                                               borderRadius:
                                                   BorderRadius.circular(
                                                       12),
@@ -473,8 +473,8 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                                                     decoration:
                                                         BoxDecoration(
                                                       color: color
-                                                          .withOpacity(
-                                                              0.1),
+                                                          .withValues(
+                                                              alpha: 0.1),
                                                       borderRadius:
                                                           BorderRadius
                                                               .circular(
@@ -616,7 +616,7 @@ class _FilterChip extends StatelessWidget {
                   horizontal: 6, vertical: 1),
               decoration: BoxDecoration(
                 color: selected
-                    ? Colors.white.withOpacity(0.25)
+                    ? Colors.white.withValues(alpha: 0.25)
                     : AppColors.background,
                 borderRadius: BorderRadius.circular(10),
               ),

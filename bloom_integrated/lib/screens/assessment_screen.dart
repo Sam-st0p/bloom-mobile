@@ -71,7 +71,7 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
         return;
       }
 
-      final assessment = assessments.first as Map<String, dynamic>;
+      final assessment = assessments.first;
 
       // Get questions with options
       final questions = await _supabase
@@ -381,7 +381,7 @@ final isCorrect = selected['is_correct'] == true;
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(
-                color: AppColors.primary.withOpacity(0.1),
+                color: AppColors.primary.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Text('${_currentQ + 1}/${_questions.length}',
@@ -426,7 +426,7 @@ final isCorrect = selected['is_correct'] == true;
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(
-                color: AppColors.primary.withOpacity(0.1),
+                color: AppColors.primary.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Text('Question ${_currentQ + 1}',
@@ -438,8 +438,8 @@ final isCorrect = selected['is_correct'] == true;
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
                 color: isShortAnswer
-                    ? Colors.orange.withOpacity(0.1)
-                    : Colors.blue.withOpacity(0.1),
+                    ? Colors.orange.withValues(alpha: 0.1)
+                    : Colors.blue.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Text(
@@ -464,9 +464,9 @@ final isCorrect = selected['is_correct'] == true;
             Container(
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
-                color: Colors.orange.withOpacity(0.06),
+                color: Colors.orange.withValues(alpha: 0.06),
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.orange.withOpacity(0.3))),
+                border: Border.all(color: Colors.orange.withValues(alpha: 0.3))),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -522,9 +522,9 @@ final isCorrect = selected['is_correct'] == true;
             Container(
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
-                color: AppColors.danger.withOpacity(0.06),
+                color: AppColors.danger.withValues(alpha: 0.06),
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppColors.danger.withOpacity(0.3))),
+                border: Border.all(color: AppColors.danger.withValues(alpha: 0.3))),
               child: Row(children: [
                 Icon(Icons.warning_amber_rounded, color: AppColors.danger, size: 20),
                 const SizedBox(width: 10),
@@ -543,7 +543,7 @@ final isCorrect = selected['is_correct'] == true;
                   margin: const EdgeInsets.only(bottom: 12),
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: selected ? AppColors.primary.withOpacity(0.08) : Colors.white,
+                    color: selected ? AppColors.primary.withValues(alpha: 0.08) : Colors.white,
                     borderRadius: BorderRadius.circular(14),
                     border: Border.all(
                       color: selected ? AppColors.primary : AppColors.border,
@@ -703,8 +703,8 @@ final isCorrect = selected['is_correct'] == true;
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       color: _passed
-                          ? AppColors.primary.withOpacity(0.1)
-                          : AppColors.danger.withOpacity(0.1),
+                          ? AppColors.primary.withValues(alpha: 0.1)
+                          : AppColors.danger.withValues(alpha: 0.1),
                     ),
                     child: Center(
                       child: Text(_passed ? '🎉' : '📚',
@@ -763,7 +763,7 @@ final isCorrect = selected['is_correct'] == true;
                           Container(
                             padding: const EdgeInsets.all(10),
                             decoration: BoxDecoration(
-                              color: AppColors.primary.withOpacity(0.1),
+                              color: AppColors.primary.withValues(alpha: 0.1),
                               borderRadius: BorderRadius.circular(12),
                             ),
                             child: const Text('✅', style: TextStyle(fontSize: 20)),

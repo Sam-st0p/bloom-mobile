@@ -98,9 +98,9 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
             Container(
               width: 76, height: 76,
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.15),
+                color: Colors.white.withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(24),
-                border: Border.all(color: Colors.white.withOpacity(0.3), width: 1.5)),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.3), width: 1.5)),
               child: const Center(
                 child: Icon(Icons.lock_reset_rounded, color: Colors.white, size: 36)),
             ),
@@ -111,7 +111,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
             const SizedBox(height: 6),
             Text('Enter your new password below',
                 style: GoogleFonts.nunito(
-                    color: Colors.white.withOpacity(0.75), fontSize: 13)),
+                    color: Colors.white.withValues(alpha: 0.75), fontSize: 13)),
           ]),
         ),
 
@@ -134,7 +134,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
         Container(
           width: 80, height: 80,
           decoration: BoxDecoration(
-            color: AppColors.primary.withOpacity(0.1),
+            color: AppColors.primary.withValues(alpha: 0.1),
             shape: BoxShape.circle),
           child: const Icon(Icons.check_circle_rounded,
               color: AppColors.primary, size: 48),
@@ -168,9 +168,9 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: AppColors.danger.withOpacity(0.08),
+                color: AppColors.danger.withValues(alpha: 0.08),
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppColors.danger.withOpacity(0.3))),
+                border: Border.all(color: AppColors.danger.withValues(alpha: 0.3))),
               child: Row(children: [
                 const Icon(Icons.error_outline, color: AppColors.danger, size: 18),
                 const SizedBox(width: 8),
@@ -185,7 +185,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
           Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
-              color: AppColors.primary.withOpacity(0.06),
+              color: AppColors.primary.withValues(alpha: 0.06),
               borderRadius: BorderRadius.circular(12)),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -257,12 +257,12 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primary,
                 foregroundColor: Colors.white,
-                disabledBackgroundColor: AppColors.primary.withOpacity(0.4),
+                disabledBackgroundColor: AppColors.primary.withValues(alpha: 0.4),
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(16)),
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 elevation: 4,
-                shadowColor: AppColors.primary.withOpacity(0.4)),
+                shadowColor: AppColors.primary.withValues(alpha: 0.4)),
               child: _loading
                   ? const SizedBox(height: 20, width: 20,
                       child: CircularProgressIndicator(

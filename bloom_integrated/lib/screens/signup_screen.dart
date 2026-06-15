@@ -3,6 +3,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../theme/app_theme.dart';
 import '../utils/validators.dart';
 import '../services/auth_service.dart';
@@ -10,11 +11,14 @@ import '../services/auth_service.dart';
 class SignupScreen extends StatefulWidget {
   final VoidCallback onGoLogin;
   final void Function({required String email, required String fullName}) onNeedsOtp;
+  /// Called after Google sign-up so the shell skips role selection (guest)
+  final VoidCallback? onGuestSignup;
 
   const SignupScreen({
     super.key,
     required this.onGoLogin,
     required this.onNeedsOtp,
+    this.onGuestSignup,
   });
 
   @override
@@ -44,11 +48,26 @@ class _SignupScreenState extends State<SignupScreen> {
     super.dispose();
   }
 
+  // ── Helpers ──────────────────────────────────────────────────────────────
+
+  bool get _isCvsuEmail =>
+      _emailCtrl.text.trim().toLowerCase().endsWith('@cvsu.edu.ph');
+
+  // ── Email/password signup ─────────────────────────────────────────────────
+
   Future<void> _handleSignup() async {
     if (_loading) return;
     setState(() => _error = null);
 
     if (!_formKey.currentState!.validate()) return;
+
+    // Extra guard — validator covers this but be explicit
+    if (!_isCvsuEmail) {
+      setState(() => _error =
+          'Only @cvsu.edu.ph institutional emails can create an account here.\n'
+          'Use "Continue with Google" for other accounts.');
+      return;
+    }
 
     setState(() => _loading = true);
 
@@ -69,9 +88,11 @@ class _SignupScreenState extends State<SignupScreen> {
       return;
     }
 
-    // Success — tell parent to show OTP inline
+    // Success — tell parent to show OTP screen
     widget.onNeedsOtp(email: cleanEmail, fullName: fullName);
   }
+
+  // ── Google signup → auto-assign guest (mirrors login) ────────────────────
 
   Future<void> _handleGoogleSignup() async {
     if (_loading) return;
@@ -79,9 +100,23 @@ class _SignupScreenState extends State<SignupScreen> {
     try {
       final error = await AuthService.signInWithGoogle();
       if (!mounted) return;
-      if (error != null && error != 'Google sign-in cancelled.') {
-        setState(() => _error = error);
+
+      if (error != null) {
+        if (error != 'Google sign-in cancelled.') setState(() => _error = error);
+        return;
       }
+
+      // Auto-assign guest role — same as login does
+      final userId = Supabase.instance.client.auth.currentUser?.id;
+      if (userId != null) {
+        await Supabase.instance.client.from('profiles').upsert({
+          'id':         userId,
+          'role':       'guest',
+          'updated_at': DateTime.now().toIso8601String(),
+        }, onConflict: 'id');
+      }
+
+      (widget.onGuestSignup ?? widget.onGoLogin)();
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -115,30 +150,36 @@ class _SignupScreenState extends State<SignupScreen> {
                 onTap: widget.onGoLogin,
                 child: Container(
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.15),
+                    color: Colors.white.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(12)),
                   padding: const EdgeInsets.all(10),
-                  child: const Icon(Icons.chevron_left, color: Colors.white, size: 22)),
+                  child: const Icon(Icons.chevron_left,
+                      color: Colors.white, size: 22)),
               ),
             ),
             const SizedBox(height: 16),
             Container(
               width: 76, height: 76,
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.15),
+                color: Colors.white.withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(24),
-                border: Border.all(color: Colors.white.withOpacity(0.3), width: 1.5)),
+                border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.3), width: 1.5)),
               child: const Center(
-                child: Icon(Icons.diversity_3_rounded, color: Colors.white, size: 36)),
+                child: Icon(Icons.diversity_3_rounded,
+                    color: Colors.white, size: 36)),
             ),
             const SizedBox(height: 16),
             Text('Create Account',
                 style: GoogleFonts.nunito(
-                    color: Colors.white, fontSize: 22, fontWeight: FontWeight.w900)),
+                    color: Colors.white,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w900)),
             const SizedBox(height: 6),
             Text('Join the GADRC CvSU community',
                 style: GoogleFonts.nunito(
-                    color: Colors.white.withOpacity(0.75), fontSize: 13)),
+                    color: Colors.white.withValues(alpha: 0.75),
+                    fontSize: 13)),
           ]),
         ),
 
@@ -152,14 +193,15 @@ class _SignupScreenState extends State<SignupScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
 
-                  // ── Google button ───────────────────────────────────
+                  // ── Google (Guest) button ───────────────────────────
                   SizedBox(
                     width: double.infinity,
                     child: OutlinedButton(
                       onPressed: _loading ? null : _handleGoogleSignup,
                       style: OutlinedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 14),
-                        side: BorderSide(color: AppColors.textLight.withOpacity(0.4)),
+                        side: BorderSide(
+                            color: AppColors.textLight.withValues(alpha: 0.4)),
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(16))),
                       child: Row(
@@ -174,17 +216,42 @@ class _SignupScreenState extends State<SignupScreen> {
                               border: Border.all(color: Colors.grey.shade300)),
                             child: const Center(
                               child: Text('G',
-                                  style: TextStyle(fontSize: 13,
+                                  style: TextStyle(
+                                      fontSize: 13,
                                       fontWeight: FontWeight.w700,
                                       color: Color(0xFF4285F4)))),
                           ),
                           const SizedBox(width: 10),
                           Text('Continue with Google',
                               style: GoogleFonts.nunito(
-                                  fontSize: 15, fontWeight: FontWeight.w700,
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w700,
                                   color: AppColors.textDark)),
+                          const SizedBox(width: 8),
+                          // Guest badge — matches the login screen
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.grey.shade100,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text('Guest',
+                                style: GoogleFonts.nunito(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w700,
+                                    color: AppColors.textLight)),
+                          ),
                         ],
                       ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Center(
+                    child: Text(
+                      'Google accounts are granted guest access only',
+                      style: GoogleFonts.nunito(
+                          fontSize: 11, color: AppColors.textLight),
                     ),
                   ),
                   const SizedBox(height: 20),
@@ -194,7 +261,7 @@ class _SignupScreenState extends State<SignupScreen> {
                     const Expanded(child: Divider()),
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 12),
-                      child: Text('or sign up with email',
+                      child: Text('or sign up with CvSU email',
                           style: GoogleFonts.nunito(
                               color: AppColors.textLight, fontSize: 13))),
                     const Expanded(child: Divider()),
@@ -206,20 +273,27 @@ class _SignupScreenState extends State<SignupScreen> {
                     Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: AppColors.danger.withOpacity(0.08),
+                        color: AppColors.danger.withValues(alpha: 0.08),
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: AppColors.danger.withOpacity(0.3))),
-                      child: Row(children: [
-                        const Icon(Icons.error_outline, color: AppColors.danger, size: 18),
-                        const SizedBox(width: 8),
-                        Expanded(child: Text(_error!,
-                            style: GoogleFonts.nunito(color: AppColors.danger, fontSize: 13))),
-                      ]),
+                        border: Border.all(
+                            color: AppColors.danger.withValues(alpha: 0.3))),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Icon(Icons.error_outline,
+                              color: AppColors.danger, size: 18),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(_error!,
+                                style: GoogleFonts.nunito(
+                                    color: AppColors.danger, fontSize: 13)),
+                          ),
+                        ]),
                     ),
                     const SizedBox(height: 16),
                   ],
 
-                  // ── Name row ────────────────────────────────────────
+                  // ── Full name ────────────────────────────────────────
                   _buildLabel('FULL NAME'),
                   const SizedBox(height: 8),
                   Row(
@@ -242,19 +316,39 @@ class _SignupScreenState extends State<SignupScreen> {
                   ),
                   const SizedBox(height: 16),
 
-                  // ── Email ───────────────────────────────────────────
-                  _buildLabel('EMAIL ADDRESS'),
+                  // ── CvSU email ───────────────────────────────────────
+                  _buildLabel('CVSU EMAIL'),
                   const SizedBox(height: 8),
                   _buildFormField(
-                    ctrl:        _emailCtrl,
-                    hint:        'your@email.com',
-                    icon:        Icons.mail_outline,
-                    inputType:   TextInputType.emailAddress,
-                    validator:   AppValidators.email,
+                    ctrl:      _emailCtrl,
+                    hint:      'you@cvsu.edu.ph',
+                    icon:      Icons.mail_outline,
+                    inputType: TextInputType.emailAddress,
+                    onChanged: (_) => setState(() {}), // rebuild suffix tick
+                    // Validate it's a CvSU email specifically
+                    validator: (v) {
+                      final base = AppValidators.email(v);
+                      if (base != null) return base;
+                      if (!(v ?? '').trim().toLowerCase()
+                          .endsWith('@cvsu.edu.ph')) {
+                        return 'Only @cvsu.edu.ph emails are accepted here.';
+                      }
+                      return null;
+                    },
+                    suffix: _isCvsuEmail
+                        ? const Icon(Icons.verified_outlined,
+                            color: Colors.green, size: 20)
+                        : null,
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Use your institutional CvSU email address',
+                    style: GoogleFonts.nunito(
+                        fontSize: 11, color: AppColors.textLight),
+                  ),
+                  const SizedBox(height: 14),
 
-                  // ── Password ────────────────────────────────────────
+                  // ── Password ─────────────────────────────────────────
                   _buildLabel('PASSWORD'),
                   const SizedBox(height: 8),
                   _buildFormField(
@@ -270,12 +364,13 @@ class _SignupScreenState extends State<SignupScreen> {
                               ? Icons.visibility_off_outlined
                               : Icons.visibility_outlined,
                           color: AppColors.textLight, size: 20),
-                      onPressed: () => setState(() => _obscurePass = !_obscurePass)),
+                      onPressed: () =>
+                          setState(() => _obscurePass = !_obscurePass)),
                   ),
                   _buildStrengthBar(_passCtrl.text),
                   const SizedBox(height: 16),
 
-                  // ── Confirm Password ────────────────────────────────
+                  // ── Confirm password ─────────────────────────────────
                   _buildLabel('CONFIRM PASSWORD'),
                   const SizedBox(height: 8),
                   _buildFormField(
@@ -283,22 +378,24 @@ class _SignupScreenState extends State<SignupScreen> {
                     hint:      'Re-enter password',
                     icon:      Icons.lock_outline,
                     obscure:   _obscureConfirm,
-                    validator: (v) => AppValidators.confirmPassword(v, _passCtrl.text),
+                    validator: (v) =>
+                        AppValidators.confirmPassword(v, _passCtrl.text),
                     suffix: IconButton(
                       icon: Icon(
                           _obscureConfirm
                               ? Icons.visibility_off_outlined
                               : Icons.visibility_outlined,
                           color: AppColors.textLight, size: 20),
-                      onPressed: () => setState(() => _obscureConfirm = !_obscureConfirm)),
+                      onPressed: () =>
+                          setState(() => _obscureConfirm = !_obscureConfirm)),
                   ),
                   const SizedBox(height: 20),
 
-                  // ── Info note ───────────────────────────────────────
+                  // ── Info note ─────────────────────────────────────────
                   Container(
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
-                      color: AppColors.primary.withOpacity(0.08),
+                      color: AppColors.primary.withValues(alpha: 0.08),
                       borderRadius: BorderRadius.circular(12)),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -306,15 +403,20 @@ class _SignupScreenState extends State<SignupScreen> {
                         const Icon(Icons.info_outline_rounded,
                             color: AppColors.primary, size: 18),
                         const SizedBox(width: 10),
-                        Expanded(child: Text(
-                          'A 6-digit verification code will be sent to your email. After verifying, you\'ll choose your role.',
-                          style: GoogleFonts.nunito(
-                              fontSize: 12, color: AppColors.textMid, height: 1.5))),
+                        Expanded(
+                          child: Text(
+                            'A 6-digit verification code will be sent to your '
+                            '@cvsu.edu.ph email. After verifying, you\'ll select '
+                            'your role (Student, Teacher, or Faculty).',
+                            style: GoogleFonts.nunito(
+                                fontSize: 12,
+                                color: AppColors.textMid,
+                                height: 1.5))),
                       ]),
                   ),
                   const SizedBox(height: 20),
 
-                  // ── Create Account button ───────────────────────────
+                  // ── Create Account button ─────────────────────────────
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
@@ -322,24 +424,27 @@ class _SignupScreenState extends State<SignupScreen> {
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppColors.primary,
                         foregroundColor: Colors.white,
-                        disabledBackgroundColor: AppColors.primary.withOpacity(0.4),
+                        disabledBackgroundColor:
+                            AppColors.primary.withValues(alpha: 0.4),
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(16)),
                         padding: const EdgeInsets.symmetric(vertical: 16),
                         elevation: 4,
-                        shadowColor: AppColors.primary.withOpacity(0.4)),
+                        shadowColor: AppColors.primary.withValues(alpha: 0.4)),
                       child: _loading
-                          ? const SizedBox(height: 20, width: 20,
+                          ? const SizedBox(
+                              height: 20, width: 20,
                               child: CircularProgressIndicator(
                                   color: Colors.white, strokeWidth: 2.5))
                           : Text('Create Account',
                               style: GoogleFonts.nunito(
-                                  fontSize: 16, fontWeight: FontWeight.w800)),
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w800)),
                     ),
                   ),
                   const SizedBox(height: 16),
 
-                  // ── Sign in link ────────────────────────────────────
+                  // ── Sign in link ──────────────────────────────────────
                   Center(
                     child: GestureDetector(
                       onTap: widget.onGoLogin,
@@ -349,7 +454,8 @@ class _SignupScreenState extends State<SignupScreen> {
                               color: AppColors.textLight, fontSize: 13),
                           children: [
                             const TextSpan(text: 'Already have an account? '),
-                            TextSpan(text: 'Sign In',
+                            TextSpan(
+                                text: 'Sign In',
                                 style: GoogleFonts.nunito(
                                     color: AppColors.primary,
                                     fontWeight: FontWeight.w800)),
@@ -366,6 +472,8 @@ class _SignupScreenState extends State<SignupScreen> {
     );
   }
 
+  // ── Helpers ───────────────────────────────────────────────────────────────
+
   Widget _buildStrengthBar(String password) {
     if (password.isEmpty) return const SizedBox(height: 6);
     final score  = AppValidators.passwordStrength(password);
@@ -377,12 +485,13 @@ class _SignupScreenState extends State<SignupScreen> {
     final color  = score < colors.length ? colors[score] : Colors.green;
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       const SizedBox(height: 8),
-      Row(children: List.generate(5, (i) => Expanded(child: Container(
-          height: 4,
-          margin: EdgeInsets.only(right: i < 4 ? 4 : 0),
-          decoration: BoxDecoration(
-            color: i < score ? color : AppColors.border,
-            borderRadius: BorderRadius.circular(2)))))),
+      Row(children: List.generate(5, (i) => Expanded(
+          child: Container(
+            height: 4,
+            margin: EdgeInsets.only(right: i < 4 ? 4 : 0),
+            decoration: BoxDecoration(
+              color: i < score ? color : AppColors.border,
+              borderRadius: BorderRadius.circular(2)))))),
       const SizedBox(height: 4),
       Text(score > 0 ? labels[score] : '',
           style: GoogleFonts.nunito(
@@ -401,20 +510,21 @@ class _SignupScreenState extends State<SignupScreen> {
     void Function(String)? onChanged,
   }) {
     return TextFormField(
-      controller:   ctrl,
-      obscureText:  obscure,
-      keyboardType: inputType,
-      validator:    validator,
-      onChanged:    onChanged,
+      controller:       ctrl,
+      obscureText:      obscure,
+      keyboardType:     inputType,
+      validator:        validator,
+      onChanged:        onChanged,
       style: GoogleFonts.nunito(fontSize: 14, color: AppColors.textDark),
       autovalidateMode: AutovalidateMode.onUserInteraction,
       decoration: InputDecoration(
-        hintText:    hint,
-        hintStyle:   GoogleFonts.nunito(color: AppColors.textLight, fontSize: 13),
-        prefixIcon:  Icon(icon, color: AppColors.textLight, size: 20),
-        suffixIcon:  suffix,
-        filled:      true,
-        fillColor:   Colors.white,
+        hintText:   hint,
+        hintStyle:  GoogleFonts.nunito(
+            color: AppColors.textLight, fontSize: 13),
+        prefixIcon: Icon(icon, color: AppColors.textLight, size: 20),
+        suffixIcon: suffix,
+        filled:     true,
+        fillColor:  Colors.white,
         border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
             borderSide: const BorderSide(color: AppColors.border)),
@@ -423,13 +533,15 @@ class _SignupScreenState extends State<SignupScreen> {
             borderSide: const BorderSide(color: AppColors.border)),
         focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: AppColors.primary, width: 2)),
+            borderSide:
+                const BorderSide(color: AppColors.primary, width: 2)),
         errorBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
             borderSide: const BorderSide(color: AppColors.danger)),
         focusedErrorBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: AppColors.danger, width: 2)),
+            borderSide:
+                const BorderSide(color: AppColors.danger, width: 2)),
       ),
     );
   }
@@ -437,7 +549,9 @@ class _SignupScreenState extends State<SignupScreen> {
   Widget _buildLabel(String text) {
     return Text(text,
         style: GoogleFonts.nunito(
-            fontSize: 12, fontWeight: FontWeight.w700,
-            color: AppColors.textMid, letterSpacing: 0.5));
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+            color: AppColors.textMid,
+            letterSpacing: 0.5));
   }
 }
