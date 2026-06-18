@@ -1,3 +1,5 @@
+// lib/screens/home_screen.dart
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -6,16 +8,42 @@ import '../models/models.dart';
 import '../widgets/common_widgets.dart';
 import '../services/activity_service.dart';
 
+// ----------------------------------------------------------------------------
+// Lightweight view model for the live-now banner (no dedicated table/model
+// exists for this yet — see ASSUMPTION notes above).
+// ----------------------------------------------------------------------------
+class LiveSeminar {
+  final String id;
+  final String title;
+  final int attendees;
+  final String statusLabel; // e.g. "happening now"
+  const LiveSeminar(this.id, this.title, this.attendees, this.statusLabel);
+}
+
 class HomeScreen extends StatefulWidget {
-  final Function(int) onNavigate;
-  final VoidCallback onBellTap;
+  /// Tab switcher from MainShell (0=Home,1=Library,2=Events,3=Achievement,4=Profile).
+  final void Function(int tabIndex) onSwitchTab;
+
+  /// Opens the Notifications screen.
+  final VoidCallback onOpenNotifications;
+
+  /// Unread notification count, owned by the parent (same source the
+  /// previous screen used) so the bell badge stays in sync app-wide.
   final int unreadCount;
+
+  /// Opens the in-app Virtual Conference room for a live seminar.
+  /// Optional — if not provided, tapping the live banner just switches to
+  /// the Events tab.
+  final void Function(LiveSeminar seminar)? onJoinLive;
+
   const HomeScreen({
     super.key,
-    required this.onNavigate,
-    required this.onBellTap,
+    required this.onSwitchTab,
+    required this.onOpenNotifications,
     required this.unreadCount,
+    this.onJoinLive,
   });
+
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
@@ -24,13 +52,18 @@ class _HomeScreenState extends State<HomeScreen> {
   final _supabase = Supabase.instance.client;
 
   String _firstName = '';
+  String _fullName = '';
+  String _role = 'student';
   int _completedModules = 0;
   int _totalModules = 0;
   int _badgeCount = 0;
   int _seminarCount = 0;
+
   List<ModuleModel> _inProgressModules = [];
   List<EventModel> _upcomingEvents = [];
   List<Map<String, dynamic>> _announcements = [];
+  LiveSeminar? _live;
+
   bool _loading = true;
 
   @override
@@ -46,11 +79,11 @@ class _HomeScreenState extends State<HomeScreen> {
       final userId = _supabase.auth.currentUser?.id;
       if (userId == null) return;
 
-     final profile = await _supabase
-    .from('profiles')
-    .select('full_name, role')
-    .eq('id', userId)
-    .maybeSingle();
+      final profile = await _supabase
+          .from('profiles')
+          .select('full_name, role')
+          .eq('id', userId)
+          .maybeSingle();
 
       final modulesData = await _supabase
           .from('modules')
@@ -98,391 +131,570 @@ class _HomeScreenState extends State<HomeScreen> {
           .order('published_at', ascending: false)
           .limit(3);
 
+      final live = await _fetchLiveSeminar();
+
       if (mounted) {
         setState(() {
           final fullName = profile?['full_name'] as String? ?? '';
-          _firstName = fullName.split(' ').first;
+          _fullName = fullName.isEmpty ? 'Welcome!' : fullName;
+          _firstName = fullName.isEmpty ? '' : fullName.split(' ').first;
+          _role = profile?['role'] as String? ?? 'student';
           _totalModules = allModules.length;
-          _completedModules = allModules.where((m) => m.progress == 100).length;
-          _inProgressModules =
-              allModules.where((m) => m.progress > 0 && m.progress < 100).toList();
+          _completedModules =
+              allModules.where((m) => m.progress == 100).length;
+          _inProgressModules = allModules
+              .where((m) => m.progress > 0 && m.progress < 100)
+              .toList();
           _badgeCount = (badgesData as List).length;
           _seminarCount = (seminarData as List).length;
           _upcomingEvents = (eventsData as List)
               .map((e) => EventModel.fromMap(e as Map<String, dynamic>))
               .toList();
           _announcements = List<Map<String, dynamic>>.from(announcementsData);
+          _live = live;
           _loading = false;
         });
       }
-    } catch (e) {
+    } catch (_) {
       if (mounted) setState(() => _loading = false);
     }
   }
 
-  String _greeting() {
-    final hour = DateTime.now().hour;
-    if (hour < 12) return 'Good morning,';
-    if (hour < 17) return 'Good afternoon,';
+  // Isolated on purpose — a schema mismatch here should never take down
+  // the rest of the home screen. See ASSUMPTION notes at the top of file.
+  Future<LiveSeminar?> _fetchLiveSeminar() async {
+    try {
+      final nowIso = DateTime.now().toIso8601String();
+      final rows = await _supabase
+          .from('events')
+          .select('id, title, start_date, end_date')
+          .lte('start_date', nowIso)
+          .gte('end_date', nowIso)
+          .order('start_date')
+          .limit(1);
+
+      if ((rows as List).isEmpty) return null;
+      final row = rows.first as Map<String, dynamic>;
+
+      int attendees = 0;
+      try {
+        final regs = await _supabase
+            .from('seminar_registrations')
+            .select('id')
+            .eq('event_id', row['id']);
+        attendees = (regs as List).length;
+      } catch (_) {
+        // Attendee count is a nice-to-have, not required for the banner.
+      }
+
+      return LiveSeminar(
+        row['id'].toString(),
+        row['title'] as String? ?? 'Live session',
+        attendees,
+        'happening now',
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  String get _greeting {
+    final h = DateTime.now().hour;
+    if (h < 12) return 'Good morning,';
+    if (h < 18) return 'Good afternoon,';
     return 'Good evening,';
+  }
+
+  String _roleLabel() {
+    switch (_role) {
+      case 'teacher':
+        return 'Teacher';
+      case 'faculty':
+        return 'Faculty';
+      case 'guest':
+        return 'Guest';
+      default:
+        return 'Student';
+    }
+  }
+
+  int get _overall =>
+      _totalModules == 0 ? 0 : ((_completedModules / _totalModules) * 100).round();
+
+  String _initials(String name) {
+    final parts = name.trim().split(RegExp(r'\s+'));
+    if (parts.isEmpty || parts.first.isEmpty) return '?';
+    return parts.take(2).map((p) => p.isEmpty ? '' : p[0]).join().toUpperCase();
+  }
+
+  void _openModule(ModuleModel m) {
+    ActivityService.log(
+      activityType: 'module_opened',
+      referenceId: m.id,
+      referenceType: 'module',
+      metadata: {'title': m.title},
+    );
+    widget.onSwitchTab(1);
   }
 
   @override
   Widget build(BuildContext context) {
-    return RefreshIndicator(
-      color: AppColors.primary,
-      onRefresh: _loadAll,
-      child: SingleChildScrollView(
-        physics: const AlwaysScrollableScrollPhysics(),
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      body: RefreshIndicator(
+        color: AppColors.primary,
+        onRefresh: _loadAll,
+        child: SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: EdgeInsets.zero,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _header(),
+              _loading
+                  ? const Padding(
+                      padding: EdgeInsets.only(top: 60),
+                      child: Center(
+                        child: CircularProgressIndicator(color: AppColors.primary),
+                      ),
+                    )
+                  : Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          if (_live != null) ...[
+                            _LiveBanner(
+                              seminar: _live!,
+                              onTap: () => widget.onJoinLive != null
+                                  ? widget.onJoinLive!(_live!)
+                                  : widget.onSwitchTab(2),
+                            ),
+                            const SizedBox(height: 18),
+                          ],
+
+                          _quickActions(),
+                          const SizedBox(height: 20),
+
+                          if (_announcements.isNotEmpty) ...[
+                            SectionHeader(
+                              title: 'Announcements',
+                              action: 'See all',
+                              onAction: widget.onOpenNotifications,
+                            ),
+                            const SizedBox(height: 12),
+                            ..._announcements.map((a) => _AnnouncementCard(a: a)),
+                            const SizedBox(height: 8),
+                          ],
+
+                          SectionHeader(
+                            title: 'Continue Learning',
+                            action: 'View all',
+                            onAction: () => widget.onSwitchTab(1),
+                          ),
+                          const SizedBox(height: 12),
+                          if (_inProgressModules.isEmpty)
+                            _EmptyState(
+                              message: "You haven't started a module yet.",
+                              actionLabel: 'Go to Library',
+                              onAction: () => widget.onSwitchTab(1),
+                            )
+                          else ...[
+                            _ResumeHero(
+                              module: _inProgressModules.first,
+                              onTap: () => _openModule(_inProgressModules.first),
+                            ),
+                            ..._inProgressModules.skip(1).take(2).map(
+                                  (m) => Padding(
+                                    padding: const EdgeInsets.only(top: 10),
+                                    child: _ContinueRow(
+                                      module: m,
+                                      onTap: () => _openModule(m),
+                                    ),
+                                  ),
+                                ),
+                          ],
+                          const SizedBox(height: 20),
+
+                          SectionHeader(
+                            title: 'Upcoming Events',
+                            action: 'See all',
+                            onAction: () => widget.onSwitchTab(2),
+                          ),
+                          const SizedBox(height: 12),
+                          _upcomingEvents.isEmpty
+                              ? _EmptyState(
+                                  message: 'No events scheduled yet — check back soon.',
+                                  actionLabel: 'View calendar',
+                                  onAction: () => widget.onSwitchTab(2),
+                                )
+                              : _upcomingStrip(),
+                        ],
+                      ),
+                    ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ---- Header with avatar, greeting, role pill, bell, and progress ring ----
+  Widget _header() {
+    return GradientHeader(
+      bottomPadding: 20,
+      child: SafeArea(
+        bottom: false,
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── Header ──────────────────────────────────────────────
-            Container(
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [AppColors.primaryDark, AppColors.primary],
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 46,
+                  height: 46,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.22),
+                    shape: BoxShape.circle,
+                  ),
+                  alignment: Alignment.center,
+                  child: Text(
+                    _initials(_fullName),
+                    style: GoogleFonts.nunito(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 16,
+                    ),
+                  ),
                 ),
-              ),
-              padding: const EdgeInsets.fromLTRB(20, 20, 20, 64),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Column(
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(_greeting(),
+                      Text(
+                        _greeting,
+                        style: GoogleFonts.nunito(
+                          color: Colors.white.withValues(alpha: 0.75),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        _firstName.isEmpty ? _fullName : _firstName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.nunito(
+                          color: Colors.white,
+                          fontSize: 20,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.18),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          _roleLabel(),
                           style: GoogleFonts.nunito(
-                              color: Colors.white.withValues(alpha: 0.7),
-                              fontSize: 13)),
-                      Text(_firstName,
-                          style: GoogleFonts.nunito(
-                              color: Colors.white,
-                              fontSize: 22,
-                              fontWeight: FontWeight.w900)),
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
                     ],
                   ),
-                  // Bell button
-                  ElevatedButton(
-                    onPressed: widget.onBellTap,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.white.withValues(alpha: 0.2),
-                      shadowColor: Colors.transparent,
-                      padding: const EdgeInsets.all(10),
-                      minimumSize: const Size(44, 44),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14)),
+                ),
+                _bell(),
+              ],
+            ),
+            const SizedBox(height: 16),
+            _journeyRingStrip(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _bell() {
+    return GestureDetector(
+      onTap: widget.onOpenNotifications,
+      child: Container(
+        width: 44,
+        height: 44,
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.2),
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            const Icon(Icons.notifications_outlined, color: Colors.white, size: 22),
+            if (widget.unreadCount > 0)
+              Positioned(
+                top: 8,
+                right: 8,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  constraints: const BoxConstraints(minWidth: 16),
+                  height: 16,
+                  decoration: BoxDecoration(
+                    color: AppColors.accent,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  alignment: Alignment.center,
+                  child: Text(
+                    '${widget.unreadCount}',
+                    style: GoogleFonts.nunito(
+                      color: Colors.white,
+                      fontSize: 9,
+                      fontWeight: FontWeight.w900,
                     ),
-                    child: Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        const Icon(Icons.notifications_outlined,
-                            color: Colors.white, size: 22),
-                        if (widget.unreadCount > 0)
-                          Positioned(
-                            top: -6,
-                            right: -6,
-                            child: Container(
-                              width: 16,
-                              height: 16,
-                              decoration: const BoxDecoration(
-                                  color: AppColors.accent,
-                                  shape: BoxShape.circle),
-                              child: Center(
-                                child: Text('${widget.unreadCount}',
-                                    style: GoogleFonts.nunito(
-                                        color: Colors.white,
-                                        fontSize: 8,
-                                        fontWeight: FontWeight.w900)),
-                              ),
-                            ),
-                          ),
-                      ],
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _journeyRingStrip() {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 64,
+            height: 64,
+            child: CustomPaint(
+              painter: _RingPainter(_overall / 100),
+              child: Center(
+                child: Text(
+                  '$_overall%',
+                  style: GoogleFonts.nunito(
+                    color: Colors.white,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Your GAD journey',
+                  style: GoogleFonts.nunito(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '$_completedModules of $_totalModules modules complete · $_badgeCount badges · $_seminarCount seminars',
+                  style: GoogleFonts.nunito(
+                    color: Colors.white.withValues(alpha: 0.78),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                    height: 1.35,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ---- Quick actions ----------------------------------------------------
+  Widget _quickActions() {
+    // index 1 = Library, 2 = Events, 3 = Achievement (see ASSUMPTION #3
+    // above re: the Forum tile — it still points at index 0 from the
+    // original mockup until that tab exists).
+    final items = [
+      (Icons.menu_book_rounded, 'Modules', AppColors.primary, 1),
+      (Icons.school_rounded, 'Seminars', AppColors.purple, 2),
+      (Icons.workspace_premium_rounded, 'Certificates', AppColors.accent, 3),
+      (Icons.forum_rounded, 'Forum', AppColors.info, 0),
+    ];
+    return Row(
+      children: items.map((it) {
+        return Expanded(
+          child: GestureDetector(
+            onTap: () => widget.onSwitchTab(it.$4),
+            behavior: HitTestBehavior.opaque,
+            child: Column(
+              children: [
+                Container(
+                  width: 52,
+                  height: 52,
+                  decoration: BoxDecoration(
+                    color: it.$3.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Icon(it.$1, color: it.$3, size: 24),
+                ),
+                const SizedBox(height: 7),
+                Text(
+                  it.$2,
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.nunito(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textMid,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  // ---- Upcoming events strip --------------------------------------------
+  Widget _upcomingStrip() {
+    return SizedBox(
+      height: 150,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: _upcomingEvents.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 10),
+        itemBuilder: (_, i) => _EventCard(
+          event: _upcomingEvents[i],
+          onTap: () => widget.onSwitchTab(2),
+        ),
+      ),
+    );
+  }
+}
+
+// ----------------------------------------------------------------------------
+// Live-now banner
+// ----------------------------------------------------------------------------
+class _LiveBanner extends StatelessWidget {
+  final LiveSeminar seminar;
+  final VoidCallback onTap;
+  const _LiveBanner({required this.seminar, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Color(0xFF16A34A), Color(0xFF0E7A38)],
+          ),
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFF16A34A).withValues(alpha: 0.32),
+              blurRadius: 18,
+              offset: const Offset(0, 6),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 46,
+              height: 46,
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: const Icon(Icons.sensors_rounded, color: Colors.white, size: 24),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        width: 7,
+                        height: 7,
+                        decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        'LIVE NOW',
+                        style: GoogleFonts.nunito(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 0.6,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    seminar.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.nunito(
+                      color: Colors.white,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    seminar.attendees > 0
+                        ? '${seminar.attendees} attending · ${seminar.statusLabel}'
+                        : seminar.statusLabel,
+                    style: GoogleFonts.nunito(
+                      color: Colors.white.withValues(alpha: 0.85),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
                     ),
                   ),
                 ],
               ),
             ),
-
-            Transform.translate(
-              offset: const Offset(0, -44),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: _loading
-                    ? const Center(
-                        child: Padding(
-                          padding: EdgeInsets.only(top: 60),
-                          child: CircularProgressIndicator(
-                              color: AppColors.primary),
-                        ))
-                    : Column(
-                        children: [
-                          // Progress overview card
-                          AppCard(
-                            child: Column(
-                              children: [
-                                SectionHeader(
-                                    title: 'Your Progress',
-                                    action: 'See all →',
-                                    onAction: () => widget.onNavigate(1)),
-                                const SizedBox(height: 16),
-                                Row(children: [
-                                  _StatBox(
-                                      label: 'Modules',
-                                      value: '$_completedModules/$_totalModules',
-                                      icon: Icons.menu_book_rounded,
-                                      color: AppColors.primary),
-                                  const SizedBox(width: 10),
-                                  _StatBox(
-                                      label: 'Badges',
-                                      value: '$_badgeCount',
-                                      icon: Icons.emoji_events_rounded,
-                                      color: AppColors.accent),
-                                  const SizedBox(width: 10),
-                                  _StatBox(
-                                      label: 'Seminars',
-                                      value: '$_seminarCount',
-                                      icon: Icons.school_rounded,
-                                      color: AppColors.info),
-                                ]),
-                                const SizedBox(height: 14),
-                                AppProgressBar(
-                                    value: _totalModules > 0
-                                        ? ((_completedModules / _totalModules) * 100).round()
-                                        : 0),
-                                const SizedBox(height: 6),
-                                Align(
-                                  alignment: Alignment.centerRight,
-                                  child: Text(
-                                      '$_completedModules/$_totalModules modules completed',
-                                      style: GoogleFonts.nunito(
-                                          fontSize: 11,
-                                          color: AppColors.textLight)),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(height: 14),
-
-                          // Announcements
-                          if (_announcements.isNotEmpty) ...[
-                            SectionHeader(
-                                title: 'Announcements',
-                                action: 'See all',
-                                onAction: widget.onBellTap),
-                            const SizedBox(height: 10),
-                            ..._announcements.map((a) => Container(
-                                  margin: const EdgeInsets.only(bottom: 8),
-                                  padding: const EdgeInsets.all(14),
-                                  decoration: BoxDecoration(
-                                    color: a['is_pinned'] == true
-                                        ? AppColors.primary.withValues(alpha: 0.08)
-                                        : Colors.white,
-                                    borderRadius: BorderRadius.circular(14),
-                                    border: Border.all(
-                                        color: a['is_pinned'] == true
-                                            ? AppColors.primary.withValues(alpha: 0.3)
-                                            : AppColors.border),
-                                  ),
-                                  child: Row(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      if (a['is_pinned'] == true)
-                                        const Padding(
-                                          padding: EdgeInsets.only(right: 8, top: 2),
-                                          child: Icon(Icons.push_pin,
-                                              size: 14, color: AppColors.primary),
-                                        ),
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
-                                          children: [
-                                            Text(a['title'] ?? '',
-                                                style: GoogleFonts.nunito(
-                                                    fontWeight: FontWeight.w800,
-                                                    fontSize: 13,
-                                                    color: AppColors.textDark)),
-                                            const SizedBox(height: 4),
-                                            Text(a['body'] ?? a['content'] ?? '',
-                                                maxLines: 2,
-                                                overflow: TextOverflow.ellipsis,
-                                                style: GoogleFonts.nunito(
-                                                    fontSize: 12,
-                                                    color: AppColors.textLight)),
-                                          ],
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                )),
-                            const SizedBox(height: 8),
-                          ],
-
-                          // Continue learning
-                          if (_inProgressModules.isNotEmpty) ...[
-                            SectionHeader(
-                                title: 'Continue Learning',
-                                action: 'View all',
-                                onAction: () => widget.onNavigate(1)),
-                            const SizedBox(height: 12),
-                            ..._inProgressModules.map((m) => Padding(
-                                  padding: const EdgeInsets.only(bottom: 10),
-                                  child: GestureDetector(
-                                    onTap: () {
-                                      ActivityService.log(
-                                        activityType: 'module_opened',
-                                        referenceId: m.id,
-                                        referenceType: 'module',
-                                        metadata: {'title': m.title},
-                                      );
-                                      widget.onNavigate(1);
-                                    },
-                                    child: AppCard(
-                                      child: Row(children: [
-                                        Container(
-                                          width: 48,
-                                          height: 48,
-                                          decoration: BoxDecoration(
-                                            color: AppColors.primary.withValues(alpha: 0.15),
-                                            borderRadius: BorderRadius.circular(14),
-                                          ),
-                                          child: const Icon(Icons.menu_book_outlined,
-                                              color: AppColors.primary, size: 22),
-                                        ),
-                                        const SizedBox(width: 14),
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
-                                            children: [
-                                              Text(m.title,
-                                                  style: GoogleFonts.nunito(
-                                                      fontWeight: FontWeight.w800,
-                                                      fontSize: 13,
-                                                      color: AppColors.textDark),
-                                                  overflow: TextOverflow.ellipsis),
-                                              const SizedBox(height: 6),
-                                              AppProgressBar(
-                                                  value: m.progress,
-                                                  color: AppColors.primary),
-                                              const SizedBox(height: 4),
-                                              Text('${m.progress}% complete',
-                                                  style: GoogleFonts.nunito(
-                                                      fontSize: 11,
-                                                      color: AppColors.textLight)),
-                                            ],
-                                          ),
-                                        ),
-                                        const SizedBox(width: 8),
-                                        const Icon(Icons.chevron_right,
-                                            color: AppColors.textLight, size: 18),
-                                      ]),
-                                    ),
-                                  ),
-                                )),
-                            const SizedBox(height: 16),
-                          ],
-
-                          // Upcoming events
-                          if (_upcomingEvents.isNotEmpty) ...[
-                            SectionHeader(
-                                title: 'Upcoming Events',
-                                action: 'See all',
-                                onAction: () => widget.onNavigate(2)),
-                            const SizedBox(height: 12),
-                            SizedBox(
-                              height: 130,
-                              child: ListView.separated(
-                                scrollDirection: Axis.horizontal,
-                                itemCount: _upcomingEvents.length,
-                                separatorBuilder: (_, __) =>
-                                    const SizedBox(width: 10),
-                                itemBuilder: (context, i) {
-                                  final ev = _upcomingEvents[i];
-                                  final color = Color(ev.colorValue);
-                                  return Container(
-                                    width: 150,
-                                    decoration: BoxDecoration(
-                                        color: color,
-                                        borderRadius: BorderRadius.circular(18)),
-                                    padding: const EdgeInsets.all(14),
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Container(
-                                          decoration: BoxDecoration(
-                                            color: Colors.white.withValues(alpha: 0.25),
-                                            borderRadius: BorderRadius.circular(10),
-                                          ),
-                                          padding: const EdgeInsets.symmetric(
-                                              horizontal: 10, vertical: 5),
-                                          child: Text(ev.date,
-                                              style: GoogleFonts.nunito(
-                                                  color: Colors.white,
-                                                  fontWeight: FontWeight.w900,
-                                                  fontSize: 12)),
-                                        ),
-                                        const SizedBox(height: 10),
-                                        Text(ev.title,
-                                            style: GoogleFonts.nunito(
-                                                color: Colors.white,
-                                                fontWeight: FontWeight.w800,
-                                                fontSize: 12,
-                                                height: 1.3),
-                                            maxLines: 2,
-                                            overflow: TextOverflow.ellipsis),
-                                        const SizedBox(height: 6),
-                                        Container(
-                                          decoration: BoxDecoration(
-                                            color: Colors.white.withValues(alpha: 0.2),
-                                            borderRadius: BorderRadius.circular(20),
-                                          ),
-                                          padding: const EdgeInsets.symmetric(
-                                              horizontal: 8, vertical: 3),
-                                          child: Text(ev.category,
-                                              style: GoogleFonts.nunito(
-                                                  color: Colors.white,
-                                                  fontSize: 10,
-                                                  fontWeight: FontWeight.w700)),
-                                        ),
-                                      ],
-                                    ),
-                                  );
-                                },
-                              ),
-                            ),
-                          ],
-
-                          // Empty state
-                          if (_upcomingEvents.isEmpty &&
-                              _inProgressModules.isEmpty &&
-                              _announcements.isEmpty)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 24),
-                              child: Column(children: [
-                                const Icon(Icons.explore_outlined,
-                                    size: 48, color: AppColors.textLight),
-                                const SizedBox(height: 12),
-                                Text('Start exploring modules!',
-                                    style: GoogleFonts.nunito(
-                                        color: AppColors.textLight, fontSize: 14)),
-                                const SizedBox(height: 8),
-                                ElevatedButton(
-                                  onPressed: () => widget.onNavigate(1),
-                                  style: ElevatedButton.styleFrom(
-                                      backgroundColor: AppColors.primary),
-                                  child: Text('Go to Library',
-                                      style: GoogleFonts.nunito(
-                                          color: Colors.white,
-                                          fontWeight: FontWeight.w700)),
-                                ),
-                              ]),
-                            ),
-
-                          const SizedBox(height: 20),
-                        ],
-                      ),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.login_rounded, color: Color(0xFF0E7A38), size: 15),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Join',
+                    style: GoogleFonts.nunito(
+                      color: const Color(0xFF0E7A38),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
@@ -492,34 +704,397 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-class _StatBox extends StatelessWidget {
-  final String label, value;
-  final IconData icon;
-  final Color color;
-  const _StatBox(
-      {required this.label,
-      required this.value,
-      required this.icon,
-      required this.color});
+// ----------------------------------------------------------------------------
+// Resume hero card — first in-progress module
+// ----------------------------------------------------------------------------
+class _ResumeHero extends StatelessWidget {
+  final ModuleModel module;
+  final VoidCallback onTap;
+  const _ResumeHero({required this.module, required this.onTap});
+
   @override
   Widget build(BuildContext context) {
-    return Expanded(
+    return GestureDetector(
+      onTap: onTap,
       child: Container(
         decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.1),
-            borderRadius: BorderRadius.circular(14)),
-        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-        child: Column(children: [
-          Icon(icon, color: color, size: 22),
-          const SizedBox(height: 4),
-          Text(value,
-              style: GoogleFonts.nunito(
-                  fontWeight: FontWeight.w900, color: color, fontSize: 18)),
-          Text(label,
-              style: GoogleFonts.nunito(
-                  color: AppColors.textLight, fontSize: 11)),
-        ]),
+          color: AppColors.card,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: AppColors.primary.withValues(alpha: 0.07),
+              blurRadius: 12,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [AppColors.primaryDark, AppColors.primary],
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.22),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      'In progress',
+                      style: GoogleFonts.nunito(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    module.title,
+                    style: GoogleFonts.nunito(
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                      height: 1.3,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(14),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        AppProgressBar(value: module.progress),
+                        const SizedBox(height: 5),
+                        Text(
+                          '${module.progress}% complete',
+                          style: GoogleFonts.nunito(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.textLight,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: AppColors.primary,
+                      borderRadius: BorderRadius.circular(999),
+                      boxShadow: [
+                        BoxShadow(
+                          color: AppColors.primary.withValues(alpha: 0.4),
+                          blurRadius: 14,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 16),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Resume',
+                          style: GoogleFonts.nunito(
+                            color: Colors.white,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
+}
+
+// ----------------------------------------------------------------------------
+// Secondary continue row
+// ----------------------------------------------------------------------------
+class _ContinueRow extends StatelessWidget {
+  final ModuleModel module;
+  final VoidCallback onTap;
+  const _ContinueRow({required this.module, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AppCard(
+        padding: const EdgeInsets.all(14),
+        child: Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: AppColors.primary.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Icon(Icons.menu_book_rounded, color: AppColors.primary, size: 20),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    module.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.nunito(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.textDark,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  AppProgressBar(value: module.progress),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            const Icon(Icons.chevron_right_rounded, color: AppColors.textLight, size: 18),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ----------------------------------------------------------------------------
+// Upcoming event card
+// ----------------------------------------------------------------------------
+class _EventCard extends StatelessWidget {
+  final EventModel event;
+  final VoidCallback onTap;
+  const _EventCard({required this.event, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = Color(event.colorValue);
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 158,
+        decoration: BoxDecoration(
+          color: AppColors.card,
+          borderRadius: BorderRadius.circular(18),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.06),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(height: 5, color: color),
+            Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.calendar_today_rounded, color: color, size: 14),
+                      const SizedBox(width: 6),
+                      Text(
+                        event.date,
+                        style: GoogleFonts.nunito(
+                          color: color,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    height: 32,
+                    child: Text(
+                      event.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.nunito(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.textDark,
+                        height: 1.3,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  BadgeChip(label: event.category, color: color),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ----------------------------------------------------------------------------
+// Pinned announcement card (carried over from the previous home screen)
+// ----------------------------------------------------------------------------
+class _AnnouncementCard extends StatelessWidget {
+  final Map<String, dynamic> a;
+  const _AnnouncementCard({required this.a});
+
+  @override
+  Widget build(BuildContext context) {
+    final pinned = a['is_pinned'] == true;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: pinned ? AppColors.primary.withValues(alpha: 0.07) : AppColors.card,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: pinned ? AppColors.primary.withValues(alpha: 0.25) : AppColors.border,
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (pinned)
+            Padding(
+              padding: const EdgeInsets.only(right: 8, top: 2),
+              child: Icon(Icons.push_pin_rounded, size: 14, color: AppColors.primary),
+            ),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  a['title'] ?? '',
+                  style: GoogleFonts.nunito(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 13,
+                    color: AppColors.textDark,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  a['body'] ?? a['content'] ?? '',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.nunito(fontSize: 12, color: AppColors.textLight),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ----------------------------------------------------------------------------
+// Generic empty-state for a section
+// ----------------------------------------------------------------------------
+class _EmptyState extends StatelessWidget {
+  final String message;
+  final String actionLabel;
+  final VoidCallback onAction;
+  const _EmptyState({
+    required this.message,
+    required this.actionLabel,
+    required this.onAction,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return AppCard(
+      child: Column(
+        children: [
+          Text(
+            message,
+            textAlign: TextAlign.center,
+            style: GoogleFonts.nunito(fontSize: 13, color: AppColors.textLight),
+          ),
+          const SizedBox(height: 10),
+          GestureDetector(
+            onTap: onAction,
+            child: Text(
+              actionLabel,
+              style: GoogleFonts.nunito(
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+                color: AppColors.primary,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ----------------------------------------------------------------------------
+// Progress ring painter (white on translucent track)
+// ----------------------------------------------------------------------------
+class _RingPainter extends CustomPainter {
+  final double pct; // 0..1
+  _RingPainter(this.pct);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const stroke = 7.0;
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = (size.width - stroke) / 2;
+
+    final track = Paint()
+      ..color = Colors.white.withValues(alpha: 0.28)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = stroke;
+    canvas.drawCircle(center, radius, track);
+
+    final arc = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = stroke
+      ..strokeCap = StrokeCap.round;
+    canvas.drawArc(
+      Rect.fromCircle(center: center, radius: radius),
+      -1.5708, // -90°
+      6.2832 * pct, // 2π * pct
+      false,
+      arc,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_RingPainter old) => old.pct != pct;
 }

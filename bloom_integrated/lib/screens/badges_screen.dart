@@ -1,3 +1,27 @@
+// lib/screens/badges_screen.dart
+//
+// BLOOM — Achievements screen: the designer's new layout (trophy header,
+// "up next" badge card, richer badge tiles, certificate cards with inline
+// Save/Share) wired to the real Supabase data layer and the real
+// certificate-capture code from the previous badges_screen.dart.
+//
+// Worth knowing about:
+//   - The header's mini-stats are real numbers (certificate count, badges
+//     still locked) instead of the streak/points placeholders from the
+//     redesign — there's no streak/points table in the schema, and I'd
+//     rather not show static fake numbers dressed up as live data.
+//   - Same reasoning for the "up next" card and locked badge tiles: there's
+//     no per-badge progress field in `badges`, so instead of a fabricated
+//     progress bar, locked badges show their real description text, and
+//     the highlighted "up next" badge is just the next one alphabetically
+//     (since `badges` is queried ordered by name) with its real hint text.
+//   - The inline Save/Share buttons on a certificate card now route
+//     through the existing CertificateViewerScreen with an `autoAction`
+//     flag, then trigger the same _saveToGallery()/_shareImage() you
+//     already had, once the certificate has actually rendered. That avoids
+//     re-implementing the image-capture logic against an off-screen
+//     widget, which would have been fragile.
+
 import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
@@ -27,173 +51,431 @@ String _fmtDate(String? iso) {
 class BadgesScreen extends StatefulWidget {
   final int initialTab;
   const BadgesScreen({super.key, this.initialTab = 0});
-  @override State<BadgesScreen> createState() => _BadgesScreenState();
+  @override
+  State<BadgesScreen> createState() => _BadgesScreenState();
 }
 
-class _BadgesScreenState extends State<BadgesScreen>
-    with SingleTickerProviderStateMixin {
-  late TabController _tabs;
+class _BadgesScreenState extends State<BadgesScreen> {
   List<Map<String, dynamic>> _earnedBadges = [];
-  List<Map<String, dynamic>> _allBadges    = [];
+  List<Map<String, dynamic>> _allBadges = [];
   List<Map<String, dynamic>> _certificates = [];
   String _fullName = '';
-  bool   _loading  = true;
+  bool _loading = true;
+  late int _tab = widget.initialTab;
 
   @override
   void initState() {
     super.initState();
-    _tabs = TabController(length: 2, vsync: this, initialIndex: widget.initialTab);
     _load();
   }
-  @override void dispose() { _tabs.dispose(); super.dispose(); }
 
   Future<void> _load() async {
     setState(() => _loading = true);
     final uid = _db.auth.currentUser?.id;
-    if (uid == null) { setState(() => _loading = false); return; }
-
+    if (uid == null) {
+      setState(() => _loading = false);
+      return;
+    }
     final results = await Future.wait([
-      _db.from('student_badges')
+      _db
+          .from('student_badges')
           .select('*, badges(id, name, description, icon_url, badge_type)')
           .eq('user_id', uid)
           .order('awarded_at', ascending: false),
       _db.from('badges').select('*').order('name'),
-      _db.from('certificates')
-          .select('id, user_id, certificate_code, reference_type, issued_at, is_revoked, body_text, sig1_name, sig1_title, sig2_name, sig2_title, theme_color')
+      _db
+          .from('certificates')
+          .select(
+              'id, user_id, certificate_code, reference_type, issued_at, is_revoked, body_text, sig1_name, sig1_title, sig2_name, sig2_title, theme_color')
           .eq('user_id', uid)
           .eq('is_revoked', false)
           .order('issued_at', ascending: false),
       _db.from('profiles').select('full_name').eq('id', uid).maybeSingle(),
     ]);
-
     setState(() {
       _earnedBadges = List<Map<String, dynamic>>.from(results[0] as List);
-      _allBadges    = List<Map<String, dynamic>>.from(results[1] as List);
+      _allBadges = List<Map<String, dynamic>>.from(results[1] as List);
       _certificates = List<Map<String, dynamic>>.from(results[2] as List);
-      _fullName = (results[3] as Map<String, dynamic>?)?['full_name'] as String? ?? '';
-      _loading  = false;
+      _fullName =
+          (results[3] as Map<String, dynamic>?)?['full_name'] as String? ?? '';
+      _loading = false;
     });
   }
 
+  Set<String> get _earnedIds => _earnedBadges
+      .map((b) => b['badge_id'] as String? ?? b['badges']?['id'] as String? ?? '')
+      .toSet();
+
+  List<Map<String, dynamic>> get _lockedBadges =>
+      _allBadges.where((b) => !_earnedIds.contains(b['id'] as String? ?? '')).toList();
+
+  int get _total => _allBadges.isEmpty ? _earnedBadges.length : _allBadges.length;
+
+  double get _pct =>
+      _total == 0 ? 0 : (_earnedBadges.length / _total).clamp(0, 1).toDouble();
+
   @override
   Widget build(BuildContext context) {
-    final topPadding = MediaQuery.of(context).padding.top;
-
     return Scaffold(
       backgroundColor: const Color(0xFFF6F9F0),
-      body: RefreshIndicator(
-        color: AppColors.primary,
-        onRefresh: _load,
-        child: NestedScrollView(
-          headerSliverBuilder: (ctx, _) => [
-            SliverAppBar(
-              expandedHeight: topPadding + 160,
-              pinned: true,
-              backgroundColor: AppColors.primaryDark,
-              automaticallyImplyLeading: false,
-              leading: Navigator.canPop(context)
-                  ? IconButton(
-                      icon: const Icon(Icons.arrow_back, color: Colors.white),
-                      onPressed: () => Navigator.pop(context))
-                  : null,
-              flexibleSpace: FlexibleSpaceBar(
-                titlePadding: EdgeInsets.zero,
-                background: Container(
-                  decoration: const BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [AppColors.primaryDark, AppColors.primary],
-                    ),
+      body: Column(
+        children: [
+          _header(),
+          Expanded(
+            child: _loading
+                ? const Center(
+                    child: CircularProgressIndicator(color: AppColors.primary))
+                : RefreshIndicator(
+                    color: AppColors.primary,
+                    onRefresh: _load,
+                    child: _tab == 0 ? _badgesTab() : _certsTab(),
                   ),
-                  child: SafeArea(
-                    bottom: false,
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 20, 20, 72),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisAlignment: MainAxisAlignment.end,
-                        children: [
-                          Text(
-                            'Achievements',
-                            style: GoogleFonts.nunito(
-                              color: Colors.white,
-                              fontSize: 22,
-                              fontWeight: FontWeight.w900,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ---- Header with trophy ring ----------------------------------------------
+  Widget _header() {
+    final lockedCount = _lockedBadges.length;
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [AppColors.primaryDark, AppColors.primary],
+        ),
+      ),
+      child: SafeArea(
+        bottom: false,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Achievements',
+                      style: GoogleFonts.nunito(
+                        color: Colors.white,
+                        fontSize: 22,
+                        fontWeight: FontWeight.w900,
+                      )),
+                  const SizedBox(height: 14),
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.14),
+                      borderRadius: BorderRadius.circular(18),
+                    ),
+                    child: Row(
+                      children: [
+                        SizedBox(
+                          width: 64,
+                          height: 64,
+                          child: Stack(
+                            alignment: Alignment.center,
                             children: [
-                              _StatPill(
-                                icon: Icons.military_tech_rounded,
-                                text: '${_earnedBadges.length} Badge${_earnedBadges.length != 1 ? 's' : ''} Earned',
+                              CustomPaint(
+                                size: const Size(64, 64),
+                                painter: _RingPainter(
+                                    _pct, const Color(0xFFFFBA08)),
                               ),
-                              const SizedBox(width: 10),
-                              _StatPill(
-                                icon: Icons.workspace_premium_rounded,
-                                text: '${_certificates.length} Certificate${_certificates.length != 1 ? 's' : ''}',
+                              const Icon(Icons.emoji_events_rounded,
+                                  color: Color(0xFFFFBA08), size: 24),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                  '${_earnedBadges.length} of $_total badges earned',
+                                  style: GoogleFonts.nunito(
+                                    color: Colors.white,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w800,
+                                  )),
+                              const SizedBox(height: 5),
+                              Row(
+                                children: [
+                                  _miniStat(
+                                      Icons.workspace_premium_rounded,
+                                      '${_certificates.length} certificate${_certificates.length == 1 ? '' : 's'}',
+                                      const Color(0xFFFFBA08)),
+                                  const SizedBox(width: 14),
+                                  _miniStat(
+                                      Icons.flag_rounded,
+                                      lockedCount == 0
+                                          ? 'All unlocked!'
+                                          : '$lockedCount to unlock',
+                                      const Color(0xFFF4A261)),
+                                ],
                               ),
                             ],
                           ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
                   ),
-                ),
-              ),
-              bottom: TabBar(
-                controller: _tabs,
-                indicatorColor: Colors.white,
-                indicatorWeight: 3,
-                labelColor: Colors.white,
-                unselectedLabelColor: Colors.white54,
-                labelStyle: GoogleFonts.nunito(fontWeight: FontWeight.w700, fontSize: 13),
-                tabs: const [
-                  Tab(icon: Icon(Icons.military_tech_rounded, size: 16), text: 'Achievements'),
-                  Tab(icon: Icon(Icons.workspace_premium_rounded, size: 16), text: 'Certificates'),
                 ],
               ),
             ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                _tabButton('Badges', Icons.military_tech_rounded, 0),
+                _tabButton('Certificates', Icons.workspace_premium_rounded, 1),
+              ],
+            ),
           ],
-          body: _loading
-              ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
-              : TabBarView(controller: _tabs, children: [
-                  _BadgesTab(earnedBadges: _earnedBadges, allBadges: _allBadges),
-                  _CertsTab(certificates: _certificates, fullName: _fullName),
-                ]),
         ),
+      ),
+    );
+  }
+
+  Widget _miniStat(IconData icon, String text, Color iconColor) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 15, color: iconColor),
+        const SizedBox(width: 5),
+        Text(text,
+            style: GoogleFonts.nunito(
+              color: Colors.white.withValues(alpha: 0.85),
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+            )),
+      ],
+    );
+  }
+
+  Widget _tabButton(String label, IconData icon, int index) {
+    final active = _tab == index;
+    return Expanded(
+      child: GestureDetector(
+        onTap: () => setState(() => _tab = index),
+        behavior: HitTestBehavior.opaque,
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          decoration: BoxDecoration(
+            border: Border(
+              bottom: BorderSide(
+                  color: active ? Colors.white : Colors.transparent, width: 3),
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon,
+                  size: 16,
+                  color: active
+                      ? Colors.white
+                      : Colors.white.withValues(alpha: 0.55)),
+              const SizedBox(width: 6),
+              Text(label,
+                  style: GoogleFonts.nunito(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: active
+                        ? Colors.white
+                        : Colors.white.withValues(alpha: 0.55),
+                  )),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ---- Badges tab -----------------------------------------------------------
+  Widget _badgesTab() {
+    if (_earnedBadges.isEmpty && _allBadges.isEmpty) {
+      return const _EmptyState(
+        icon: Icons.military_tech_outlined,
+        title: 'No achievements yet',
+        sub: 'Complete assessments and modules to earn achievements',
+      );
+    }
+
+    final locked = _lockedBadges;
+    // `badges` is queried ordered by name, so this is simply the next one
+    // alphabetically — there's no per-badge progress tracking to pick a
+    // genuinely "nearest" one.
+    final next = locked.isNotEmpty ? locked.first : null;
+
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        if (next != null) ...[
+          _NextBadgeCard(
+            name: next['name'] as String? ?? 'Badge',
+            hint: (next['description'] as String?)?.trim().isNotEmpty == true
+                ? next['description'] as String
+                : 'Keep learning to unlock this badge.',
+          ),
+          const SizedBox(height: 18),
+        ],
+        if (_earnedBadges.isNotEmpty) ...[
+          _sectionTitle(Icons.military_tech_rounded,
+              'Earned (${_earnedBadges.length})', AppColors.primaryDark),
+          const SizedBox(height: 10),
+          _grid(_earnedBadges.map((sb) {
+            final b = sb['badges'] as Map<String, dynamic>? ?? {};
+            return _BadgeTile(
+              name: b['name'] as String? ?? 'Badge',
+              iconUrl: b['icon_url'] as String?,
+              earned: true,
+              awardedAt: sb['awarded_at'] as String?,
+            );
+          }).toList()),
+        ],
+        if (locked.isNotEmpty) ...[
+          const SizedBox(height: 22),
+          _sectionTitle(Icons.lock_outline_rounded,
+              'Locked (${locked.length})', AppColors.textMid),
+          const SizedBox(height: 10),
+          _grid(locked.map((b) {
+            return _BadgeTile(
+              name: b['name'] as String? ?? 'Badge',
+              iconUrl: b['icon_url'] as String?,
+              earned: false,
+              description: b['description'] as String?,
+            );
+          }).toList()),
+        ],
+      ],
+    );
+  }
+
+  Widget _sectionTitle(IconData icon, String text, Color color) => Row(
+        children: [
+          Icon(icon, size: 16, color: color),
+          const SizedBox(width: 6),
+          Text(text,
+              style: GoogleFonts.nunito(
+                  fontSize: 14, fontWeight: FontWeight.w800, color: color)),
+        ],
+      );
+
+  Widget _grid(List<Widget> tiles) => GridView.count(
+        crossAxisCount: 3,
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        crossAxisSpacing: 12,
+        mainAxisSpacing: 12,
+        childAspectRatio: 0.9,
+        children: tiles,
+      );
+
+  // ---- Certificates tab -------------------------------------------------
+  Widget _certsTab() {
+    if (_certificates.isEmpty) {
+      return ListView(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(40),
+            child: Column(
+              children: [
+                Icon(Icons.workspace_premium_outlined,
+                    size: 48, color: Colors.grey[400]),
+                const SizedBox(height: 12),
+                Text('No certificates yet',
+                    style: GoogleFonts.nunito(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.grey[600])),
+                const SizedBox(height: 6),
+                Text('Attend seminars and complete modules to earn certificates',
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.nunito(fontSize: 13, color: Colors.grey)),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
+    return ListView.builder(
+      padding: const EdgeInsets.all(16),
+      itemCount: _certificates.length,
+      itemBuilder: (ctx, i) => Padding(
+        padding: const EdgeInsets.only(bottom: 14),
+        child: _CertCard(cert: _certificates[i], fullName: _fullName),
       ),
     );
   }
 }
 
-class _StatPill extends StatelessWidget {
-  final IconData icon;
-  final String text;
-  const _StatPill({required this.icon, required this.text});
+// ─────────────────────────────────────────────────────────────────
+//  "Up next" badge card (no fabricated progress — real name + hint only)
+// ─────────────────────────────────────────────────────────────────
+class _NextBadgeCard extends StatelessWidget {
+  final String name;
+  final String hint;
+  const _NextBadgeCard({required this.name, required this.hint});
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.2),
-        borderRadius: BorderRadius.circular(20),
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.primary.withValues(alpha: 0.07),
+            blurRadius: 12,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Row(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Icon(icon, size: 13, color: Colors.white),
-          const SizedBox(width: 5),
-          Text(
-            text,
-            style: GoogleFonts.nunito(
-              color: Colors.white,
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
+          Container(
+            width: 50,
+            height: 50,
+            decoration: BoxDecoration(
+              color: AppColors.info.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: const Icon(Icons.workspace_premium_rounded,
+                color: AppColors.info, size: 26),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('UP NEXT',
+                    style: GoogleFonts.nunito(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.4,
+                      color: AppColors.info,
+                    )),
+                const SizedBox(height: 3),
+                Text(name,
+                    style: GoogleFonts.nunito(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.textDark,
+                    )),
+                if (hint.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(hint,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.nunito(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                        color: AppColors.textLight,
+                      )),
+                ],
+              ],
             ),
           ),
         ],
@@ -203,296 +485,399 @@ class _StatPill extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────
-//  BADGES TAB
+//  Badge tile — earned shows the real award date, locked shows the
+//  real description instead of a fabricated progress bar
 // ─────────────────────────────────────────────────────────────────
-class _BadgesTab extends StatelessWidget {
-  final List<Map<String, dynamic>> earnedBadges;
-  final List<Map<String, dynamic>> allBadges;
-  const _BadgesTab({required this.earnedBadges, required this.allBadges});
-
-  @override
-  Widget build(BuildContext context) {
-    final earnedIds = earnedBadges
-        .map((b) => b['badge_id'] as String? ?? b['badges']?['id'] as String? ?? '')
-        .toSet();
-
-    return ListView(padding: const EdgeInsets.all(16), children: [
-      if (earnedBadges.isNotEmpty) ...[
-        _SectionHeader(icon: Icons.military_tech_rounded,
-            text: 'Earned Achievements (${earnedBadges.length})'),
-        const SizedBox(height: 10),
-        GridView.builder(
-          shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 2, childAspectRatio: 1.1,
-              crossAxisSpacing: 10, mainAxisSpacing: 10),
-          itemCount: earnedBadges.length,
-          itemBuilder: (ctx, i) {
-            final sb    = earnedBadges[i];
-            final badge = sb['badges'] as Map<String, dynamic>? ?? {};
-            return _BadgeCard(
-              name:        badge['name'] as String? ?? 'Badge',
-              description: badge['description'] as String?,
-              iconUrl:     badge['icon_url'] as String?,
-              badgeType:   badge['badge_type'] as String?,
-              awardedAt:   sb['awarded_at'] as String?,
-              earned:      true,
-            );
-          },
-        ),
-        const SizedBox(height: 24),
-      ],
-
-      ...(() {
-        final locked = allBadges
-            .where((b) => !earnedIds.contains(b['id'] as String? ?? ''))
-            .toList();
-        if (locked.isEmpty) return <Widget>[];
-        return <Widget>[
-          _SectionHeader(icon: Icons.lock_outline_rounded,
-              text: 'Locked Achievements (${locked.length})'),
-          const SizedBox(height: 10),
-          GridView.builder(
-            shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 2, childAspectRatio: 1.1,
-                crossAxisSpacing: 10, mainAxisSpacing: 10),
-            itemCount: locked.length,
-            itemBuilder: (ctx, i) => _BadgeCard(
-              name:        locked[i]['name'] as String? ?? 'Badge',
-              description: locked[i]['description'] as String?,
-              iconUrl:     locked[i]['icon_url'] as String?,
-              badgeType:   locked[i]['badge_type'] as String?,
-              earned:      false,
-            ),
-          ),
-        ];
-      })(),
-
-      if (earnedBadges.isEmpty && allBadges.isEmpty)
-        const _EmptyState(
-          icon: Icons.military_tech_outlined,
-          title: 'No achievements yet',
-          sub: 'Complete assessments and modules to earn achievements',
-        ),
-    ]);
-  }
-}
-
-class _SectionHeader extends StatelessWidget {
-  final IconData icon;
-  final String text;
-  const _SectionHeader({required this.icon, required this.text});
-  @override
-  Widget build(BuildContext context) => Row(children: [
-    Icon(icon, size: 16, color: AppColors.primaryDark),
-    const SizedBox(width: 6),
-    Text(text, style: GoogleFonts.nunito(
-        fontSize: 14, fontWeight: FontWeight.w800, color: AppColors.primaryDark)),
-  ]);
-}
-
-class _BadgeCard extends StatelessWidget {
+class _BadgeTile extends StatelessWidget {
   final String name;
-  final String? description, iconUrl, badgeType, awardedAt;
+  final String? iconUrl;
   final bool earned;
-  const _BadgeCard({
-    required this.name, this.description, this.iconUrl,
-    this.badgeType, this.awardedAt, required this.earned,
+  final String? awardedAt;
+  final String? description;
+  const _BadgeTile({
+    required this.name,
+    this.iconUrl,
+    required this.earned,
+    this.awardedAt,
+    this.description,
   });
 
   @override
-  Widget build(BuildContext context) => Container(
-    decoration: BoxDecoration(
-      color: earned ? Colors.white : Colors.white.withValues(alpha: 0.6),
-      borderRadius: BorderRadius.circular(14),
-      border: Border.all(
-          color: earned ? const Color(0xFFFDE047) : const Color(0xFFE5E7EB),
-          width: earned ? 1.5 : 1),
-      boxShadow: earned
-          ? [BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 8)]
-          : null,
-    ),
-    padding: const EdgeInsets.all(14),
-    child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-      Stack(alignment: Alignment.topRight, children: [
-        Container(
-          width: 56, height: 56,
-          decoration: BoxDecoration(
-              color: earned ? const Color(0xFFFEF9C3) : const Color(0xFFF3F4F6),
-              borderRadius: BorderRadius.circular(12)),
-          child: Center(
-            child: iconUrl != null
-                ? ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: Image.network(iconUrl!,
-                        width: 36, height: 36, fit: BoxFit.contain,
-                        errorBuilder: (_, __, ___) => Icon(
-                            Icons.military_tech_rounded, size: 28,
-                            color: earned ? AppColors.primaryDark : Colors.grey)))
-                : Icon(
-                    earned ? Icons.military_tech_rounded : Icons.lock_outline_rounded,
-                    size: 28,
-                    color: earned ? AppColors.primaryDark : Colors.grey),
-          ),
-        ),
-        if (!earned)
-          Container(
-            padding: const EdgeInsets.all(3),
-            decoration: BoxDecoration(color: Colors.grey[300], shape: BoxShape.circle),
-            child: const Icon(Icons.lock, size: 12, color: Colors.grey),
-          ),
-      ]),
-      const SizedBox(height: 8),
-      Text(name,
-          textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis,
-          style: GoogleFonts.nunito(
-              fontSize: 12, fontWeight: FontWeight.w800,
-              color: earned ? AppColors.primaryDark : Colors.grey[500])),
-      if (awardedAt != null) ...[
-        const SizedBox(height: 3),
-        Text(_fmtDate(awardedAt), style: GoogleFonts.nunito(fontSize: 10, color: Colors.grey)),
-      ] else if (description != null) ...[
-        const SizedBox(height: 3),
-        Text(description!,
-            textAlign: TextAlign.center, maxLines: 1, overflow: TextOverflow.ellipsis,
-            style: GoogleFonts.nunito(fontSize: 10, color: Colors.grey)),
-      ],
-    ]),
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────
-//  CERTIFICATES TAB
-// ─────────────────────────────────────────────────────────────────
-class _CertsTab extends StatelessWidget {
-  final List<Map<String, dynamic>> certificates;
-  final String fullName;
-  const _CertsTab({required this.certificates, required this.fullName});
-
-  String _certTitle(Map<String, dynamic> cert) {
-    final refType = cert['reference_type'] as String? ?? 'manual';
-    return refType == 'manual'
-        ? 'Certificate of Achievement'
-        : 'Certificate of ${refType[0].toUpperCase()}${refType.substring(1)}';
-  }
-
-  @override
   Widget build(BuildContext context) {
-    if (certificates.isEmpty) {
-      return const _EmptyState(
-          icon: Icons.workspace_premium_outlined,
-          title: 'No certificates yet',
-          sub: 'Attend seminars and complete modules to earn certificates');
-    }
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: certificates.length,
-      itemBuilder: (ctx, i) {
-        final cert = certificates[i];
-        return GestureDetector(
-          onTap: () => Navigator.push(ctx, MaterialPageRoute(
-              builder: (_) => CertificateViewerScreen(cert: cert, fullName: fullName))),
-          child: Container(
-            margin: const EdgeInsets.only(bottom: 14),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: const Color(0xFFC8E6C9), width: 1.5),
-              boxShadow: [BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.07), blurRadius: 10,
-                  offset: const Offset(0, 3))],
-            ),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+      decoration: BoxDecoration(
+        color: earned ? Colors.white : const Color(0xFFFBFCFB),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: earned ? const Color(0xFFFDE047) : AppColors.border,
+          width: 1.5,
+        ),
+        boxShadow: earned
+            ? [BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 8)]
+            : null,
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Stack(
+            clipBehavior: Clip.none,
+            children: [
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                      colors: [AppColors.primaryDark, AppColors.primary],
-                      begin: Alignment.centerLeft,
-                      end: Alignment.centerRight),
-                  borderRadius: BorderRadius.vertical(top: Radius.circular(12))),
-                child: Row(children: [
-                  Container(
-                    width: 36, height: 36,
-                    decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(8)),
-                    child: const Icon(Icons.workspace_premium_outlined,
-                        color: Colors.white, size: 20)),
-                  const SizedBox(width: 10),
-                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text('BLOOM GAD · GADRC CvSU',
-                        style: GoogleFonts.nunito(
-                            fontSize: 9, color: Colors.white60,
-                            letterSpacing: 1, fontWeight: FontWeight.w600)),
-                    Text(_certTitle(cert),
-                        style: GoogleFonts.nunito(
-                            fontSize: 13, color: Colors.white, fontWeight: FontWeight.w800)),
-                  ])),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(20)),
-                    child: Text('VIEW',
-                        style: GoogleFonts.nunito(
-                            fontSize: 9, color: Colors.white,
-                            fontWeight: FontWeight.w800, letterSpacing: 1))),
-                ]),
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  gradient: earned
+                      ? const LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [Color(0xFFFEF9C3), Color(0xFFFDE68A)])
+                      : null,
+                  color: earned ? null : const Color(0xFFF3F4F6),
+                  borderRadius: BorderRadius.circular(13),
+                ),
+                child: Center(
+                  child: iconUrl != null
+                      ? Image.network(iconUrl!,
+                          width: 26,
+                          height: 26,
+                          fit: BoxFit.contain,
+                          errorBuilder: (_, __, ___) => Icon(
+                              Icons.military_tech_rounded,
+                              size: 22,
+                              color: earned
+                                  ? AppColors.primaryDark
+                                  : AppColors.textLight))
+                      : Icon(Icons.military_tech_rounded,
+                          size: 22,
+                          color: earned
+                              ? AppColors.primaryDark
+                              : AppColors.textLight),
+                ),
               ),
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('This certifies that',
-                      style: GoogleFonts.nunito(fontSize: 11, color: Colors.grey[500])),
-                  const SizedBox(height: 4),
-                  Text(fullName.isNotEmpty ? fullName : 'Recipient',
-                      style: GoogleFonts.nunito(
-                          fontSize: 18, fontWeight: FontWeight.w900,
-                          color: AppColors.primaryDark, fontStyle: FontStyle.italic)),
-                  const SizedBox(height: 8),
-                  Text('has successfully fulfilled the requirements of the BLOOM GAD e-Learning Program.',
-                      style: GoogleFonts.nunito(fontSize: 11, color: Colors.grey[600], height: 1.5)),
-                  const SizedBox(height: 12),
-                  Row(children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(
-                          color: const Color(0xFFE8F5E9),
-                          borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: const Color(0xFFC8E6C9))),
-                      child: Text(cert['certificate_code'] ?? '—',
-                          style: GoogleFonts.nunito(
-                              fontSize: 11, fontWeight: FontWeight.w800,
-                              color: AppColors.primary, letterSpacing: 1))),
-                    const Spacer(),
-                    Text('Issued ${_fmtDate(cert['issued_at'] as String?)}',
-                        style: GoogleFonts.nunito(fontSize: 11, color: Colors.grey)),
-                  ]),
-                ]),
+              Positioned(
+                top: -4,
+                right: -4,
+                child: Container(
+                  width: 18,
+                  height: 18,
+                  decoration: BoxDecoration(
+                    color: earned ? AppColors.primary : Colors.white,
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                        color: earned ? Colors.white : AppColors.border,
+                        width: earned ? 2 : 1.5),
+                  ),
+                  child: Icon(earned ? Icons.check_rounded : Icons.lock_rounded,
+                      size: 10,
+                      color: earned ? Colors.white : AppColors.textLight),
+                ),
               ),
-            ]),
+            ],
           ),
-        );
-      },
+          const SizedBox(height: 6),
+          Text(name,
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: GoogleFonts.nunito(
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+                color: earned ? AppColors.primaryDark : AppColors.textMid,
+                height: 1.15,
+              )),
+          const SizedBox(height: 3),
+          if (earned)
+            Text(_fmtDate(awardedAt),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.nunito(
+                    fontSize: 9,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textLight))
+          else if ((description ?? '').isNotEmpty)
+            Text(description!,
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.nunito(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w500,
+                    color: AppColors.textLight)),
+        ],
+      ),
     );
   }
 }
 
 // ─────────────────────────────────────────────────────────────────
-//  CERTIFICATE VIEWER SCREEN
+//  Certificate card — Save/Share are real, via CertificateViewerScreen
 // ─────────────────────────────────────────────────────────────────
+class _CertCard extends StatelessWidget {
+  final Map<String, dynamic> cert;
+  final String fullName;
+  const _CertCard({required this.cert, required this.fullName});
+
+  String get _refLabel {
+    final t = cert['reference_type'] as String? ?? 'Program';
+    return t.isEmpty ? 'Program' : '${t[0].toUpperCase()}${t.substring(1)}';
+  }
+
+  void _open(BuildContext context, {CertAutoAction action = CertAutoAction.none}) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => CertificateViewerScreen(
+          cert: cert,
+          fullName: fullName,
+          autoAction: action,
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFC8E6C9), width: 1.5),
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withValues(alpha: 0.07),
+              blurRadius: 10,
+              offset: const Offset(0, 3)),
+        ],
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // The whole header + code/issued row opens the viewer. The
+          // Save/Share row below is a sibling, not nested inside this tap
+          // target, so the two don't fight over the same tap.
+          GestureDetector(
+            onTap: () => _open(context),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [AppColors.primaryDark, AppColors.primary],
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 36,
+                        height: 36,
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(9),
+                        ),
+                        child: const Icon(Icons.workspace_premium_outlined,
+                            color: Colors.white, size: 20),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('BLOOM GAD · GADRC CvSU',
+                                style: GoogleFonts.nunito(
+                                  fontSize: 9,
+                                  color: Colors.white60,
+                                  letterSpacing: 1,
+                                  fontWeight: FontWeight.w600,
+                                )),
+                            Text('Certificate of $_refLabel',
+                                style: GoogleFonts.nunito(
+                                  fontSize: 13,
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w800,
+                                )),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding:
+                            const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFE8F5E9),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: const Color(0xFFC8E6C9)),
+                        ),
+                        child: Text(cert['certificate_code'] as String? ?? '—',
+                            style: GoogleFonts.nunito(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.primary,
+                              letterSpacing: 1,
+                            )),
+                      ),
+                      const Spacer(),
+                      Text('Issued ${_fmtDate(cert['issued_at'] as String?)}',
+                          style: GoogleFonts.nunito(fontSize: 11, color: Colors.grey)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+            child: Row(
+              children: [
+                Expanded(
+                  child: _certAction(
+                    'Save',
+                    Icons.download_rounded,
+                    AppColors.primary,
+                    AppColors.primary.withValues(alpha: 0.12),
+                    () => _open(context, action: CertAutoAction.save),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _certAction(
+                    'Share',
+                    Icons.share_outlined,
+                    AppColors.primaryDark,
+                    AppColors.background,
+                    () => _open(context, action: CertAutoAction.share),
+                    bordered: true,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _certAction(String label, IconData icon, Color fg, Color bg,
+      VoidCallback onTap, {bool bordered = false}) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 11),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(10),
+          border: bordered
+              ? Border.all(color: AppColors.border, width: 1.5)
+              : null,
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 16, color: fg),
+            const SizedBox(width: 7),
+            Text(label,
+                style: GoogleFonts.nunito(
+                    fontSize: 13, fontWeight: FontWeight.w800, color: fg)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  Trophy ring painter
+// ─────────────────────────────────────────────────────────────────
+class _RingPainter extends CustomPainter {
+  final double pct; // 0..1
+  final Color color;
+  _RingPainter(this.pct, this.color);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const stroke = 7.0;
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = (size.width - stroke) / 2;
+    canvas.drawCircle(
+      center,
+      radius,
+      Paint()
+        ..color = Colors.white.withValues(alpha: 0.28)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = stroke,
+    );
+    canvas.drawArc(
+      Rect.fromCircle(center: center, radius: radius),
+      -1.5708,
+      6.2832 * pct,
+      false,
+      Paint()
+        ..color = color
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = stroke
+        ..strokeCap = StrokeCap.round,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_RingPainter old) => old.pct != pct || old.color != color;
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  CERTIFICATE VIEWER SCREEN (unchanged capture/save/share logic from the
+//  previous screen, plus an optional autoAction so list-level Save/Share
+//  buttons can trigger it once the certificate has actually rendered)
+// ─────────────────────────────────────────────────────────────────
+enum CertAutoAction { none, save, share }
+
 class CertificateViewerScreen extends StatefulWidget {
   final Map<String, dynamic> cert;
   final String fullName;
-  const CertificateViewerScreen({super.key, required this.cert, required this.fullName});
+  final CertAutoAction autoAction;
+  const CertificateViewerScreen({
+    super.key,
+    required this.cert,
+    required this.fullName,
+    this.autoAction = CertAutoAction.none,
+  });
   @override State<CertificateViewerScreen> createState() => _CertificateViewerScreenState();
 }
 
 class _CertificateViewerScreenState extends State<CertificateViewerScreen> {
   final GlobalKey _repaintKey = GlobalKey();
   bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.autoAction != CertAutoAction.none) {
+      // Wait for the first frame (so the RepaintBoundary actually has
+      // something painted to capture), plus a short buffer for the
+      // certificate's custom fonts to finish loading.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        Future.delayed(const Duration(milliseconds: 400), () {
+          if (!mounted) return;
+          if (widget.autoAction == CertAutoAction.save) {
+            _saveToGallery();
+          } else if (widget.autoAction == CertAutoAction.share) {
+            _shareImage();
+          }
+        });
+      });
+    }
+  }
 
   String get _certTitle {
     final refType = widget.cert['reference_type'] as String? ?? 'manual';
@@ -567,10 +952,12 @@ class _CertificateViewerScreenState extends State<CertificateViewerScreen> {
       final file = File('${dir.path}/$fileName');
       await file.writeAsBytes(bytes);
 
-      await Share.shareXFiles(
-        [XFile(file.path, mimeType: 'image/png')],
-        subject: _certTitle,
-        text: 'My BLOOM GAD Certificate — $_code',
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [XFile(file.path, mimeType: 'image/png')],
+          subject: _certTitle,
+          text: 'My BLOOM GAD Certificate — $_code',
+        ),
       );
 
       // Clean up temp file after sharing
@@ -667,7 +1054,7 @@ class _CertificateViewerScreenState extends State<CertificateViewerScreen> {
 }
 
 // ─────────────────────────────────────────────────────────────────
-//  CERTIFICATE CARD
+//  CERTIFICATE CARD (unchanged)
 // ─────────────────────────────────────────────────────────────────
 class CertificateCard extends StatelessWidget {
   final String certTitle, name, code, issued, bodyText,

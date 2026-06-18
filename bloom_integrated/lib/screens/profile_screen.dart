@@ -1,5 +1,5 @@
 // lib/screens/profile_screen.dart
-// BLOOM GAD Mobile App — Profile Screen (Production Ready)
+// BLOOM GAD Mobile App — Profile Screen
 
 import 'dart:async';
 import 'dart:typed_data';
@@ -223,6 +223,104 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _selectedDept   != (_profileData?['department'] as String?) ||
         _selectedCourse != (_profileData?['course']     as String?);
   }
+
+  // ── New-view helpers (real data, not placeholders) ─────────────────────────
+
+  /// Course · Year for students; department for teacher/faculty; '' otherwise.
+  String get _metaSecondaryLabel {
+    final role = _profileData?['role'] as String? ?? '';
+    if (role == 'student') {
+      final course = _profileData?['course'] as String?;
+      if (course != null && course.isNotEmpty) {
+        final rawYear = _profileData?['year_level'];
+        final yearLabel = rawYear is int && rawYear >= 1 && rawYear <= 5
+            ? kYearLevels[rawYear - 1]
+            : (rawYear is String && kYearLevels.contains(rawYear)
+                ? rawYear
+                : null);
+        return yearLabel != null ? '$course · $yearLabel' : course;
+      }
+    }
+    return _profileData?['department'] as String? ?? '';
+  }
+
+  /// 0..100, based on which required fields are actually filled in.
+  int get _profileCompletionPct {
+    final role = _profileData?['role'] as String? ?? '';
+    final checks = <bool>[
+      _displayName.isNotEmpty,
+      (_avatarUrl ?? '').isNotEmpty,
+    ];
+    if (role == 'student') {
+      checks.addAll([
+        (_profileData?['student_id'] as String? ?? '').isNotEmpty,
+        (_profileData?['department'] as String? ?? '').isNotEmpty,
+        (_profileData?['course']     as String? ?? '').isNotEmpty,
+        _profileData?['year_level'] != null,
+      ]);
+    } else if (role == 'teacher' || role == 'faculty') {
+      checks.add((_profileData?['department'] as String? ?? '').isNotEmpty);
+    }
+    if (checks.isEmpty) return 100;
+    final done = checks.where((c) => c).length;
+    return ((done / checks.length) * 100).round();
+  }
+
+  String get _profileCompletionHint {
+    final role = _profileData?['role'] as String? ?? '';
+    final missing = <String>[];
+    if (_displayName.isEmpty) missing.add('your name');
+    if ((_avatarUrl ?? '').isEmpty) missing.add('a profile photo');
+    if (role == 'student') {
+      if ((_profileData?['student_id'] as String? ?? '').isEmpty) {
+        missing.add('your student ID');
+      }
+      if ((_profileData?['department'] as String? ?? '').isEmpty) {
+        missing.add('your department');
+      }
+      if ((_profileData?['course'] as String? ?? '').isEmpty) {
+        missing.add('your course');
+      }
+    } else if (role == 'teacher' || role == 'faculty') {
+      if ((_profileData?['department'] as String? ?? '').isEmpty) {
+        missing.add('your department');
+      }
+    }
+    if (missing.isEmpty) return 'All set!';
+    if (missing.length == 1) return 'Add ${missing.first} to finish';
+    return 'Add ${missing.sublist(0, missing.length - 1).join(', ')} '
+        'and ${missing.last} to finish';
+  }
+
+  List<Widget> get _certPreviews => List.generate(_certificates.length, (i) {
+        final cert    = _certificates[i];
+        final refType = cert['reference_type'] as String? ?? 'manual';
+        final title = refType == 'manual'
+            ? 'Certificate of\nAchievement'
+            : 'Certificate of\n${refType[0].toUpperCase()}${refType.substring(1)}';
+        return ProfileCertPreview(
+          title: title,
+          date: _fmtDate(cert['issued_at'] as String?),
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) =>
+                  CertificateViewerScreen(cert: cert, fullName: _displayName),
+            ),
+          ),
+        );
+      });
+
+  List<Widget> get _badgePreviews => List.generate(_rawBadges.length, (i) {
+        final raw   = _rawBadges[i];
+        final badge = raw['badges'] as Map<String, dynamic>? ?? {};
+        return ProfileBadgePreview(
+          name: badge['name'] as String? ?? 'Badge',
+          iconUrl: badge['icon_url'] as String?,
+          date: _fmtDate(raw['awarded_at'] as String?),
+          onTap: () => _openBadgeDetail(raw),
+        );
+      });
 
   // ── Load ───────────────────────────────────────────────────────────────────
   Future<void> _load() async {
@@ -654,7 +752,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
-  // ── Snackbars ──────────────────────────────────────────────────────────────
+  // ── Snackbars / dialogs ─────────────────────────────────────────────────────
   void _showError(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -669,6 +767,39 @@ class _ProfileScreenState extends State<ProfileScreen> {
       content: Text(msg, style: GoogleFonts.poppins()),
       backgroundColor: AppColors.primary,
     ));
+  }
+
+  void _showComingSoon(String feature) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text('$feature is coming soon.', style: GoogleFonts.poppins()),
+    ));
+  }
+
+  void _showAboutDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text('About BLOOM',
+            style: GoogleFonts.poppins(
+                fontWeight: FontWeight.w700, color: AppColors.textDark)),
+        content: Text(
+          'BLOOM is the Gender and Development e-learning platform of the '
+          'GAD Resource Center, Cavite State University.',
+          style: GoogleFonts.poppins(
+              fontSize: 13, color: AppColors.textMid, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text('Close',
+                style: GoogleFonts.poppins(
+                    color: AppColors.primary, fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
   }
 
   // ── Badge detail sheet ─────────────────────────────────────────────────────
@@ -813,204 +944,476 @@ class _ProfileScreenState extends State<ProfileScreen> {
       onRefresh: _load,
       child: SingleChildScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
-        child: Column(children: [
+        child: Container(
+          color: AppColors.background,
+          child: Column(children: [
+            _header(),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+              child: _loading
+                  ? const Center(child: Padding(
+                      padding: EdgeInsets.all(40),
+                      child: CircularProgressIndicator(
+                          color: AppColors.primary)))
+                  : Column(children: [
+                      _statsStrip(),
+                      if (_profileCompletionPct < 100) ...[
+                        const SizedBox(height: 16),
+                        _completionNudge(),
+                      ],
+                      const SizedBox(height: 16),
+                      _railSection(
+                        icon: Icons.workspace_premium_outlined,
+                        title: 'My Certificates',
+                        count: _certificates.length,
+                        accent: AppColors.primary,
+                        children: _certPreviews,
+                        emptyText:
+                            'Complete modules & seminars to earn certificates',
+                      ),
+                      const SizedBox(height: 16),
+                      _railSection(
+                        icon: Icons.emoji_events_rounded,
+                        title: 'My Badges',
+                        count: _earnedBadges.length,
+                        accent: AppColors.accent,
+                        children: _badgePreviews,
+                        emptyText: 'Complete assessments to earn badges',
+                      ),
+                      const SizedBox(height: 18),
+                      _menuGroup('Account', [
+                        _MenuItem(Icons.person_outline_rounded, 'Edit profile',
+                            'Name, course, year level',
+                            () => setState(() => _editOpen = true)),
+                      ]),
+                      const SizedBox(height: 18),
+                      _menuGroup('Support', [
+                        _MenuItem(Icons.help_outline_rounded, 'Help & support',
+                            'FAQ and contact GADRC',
+                            () => Navigator.push(context, MaterialPageRoute(
+                                builder: (_) => const HelpScreen()))),
+                        _MenuItem(Icons.info_outline_rounded, 'About BLOOM',
+                            'GADRC · Cavite State University',
+                            _showAboutDialog),
+                      ]),
+                      const SizedBox(height: 18),
+                      _signOutButton(),
+                    ]),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
 
-          // ── Header ──────────────────────────────────────────────────
-          ClipPath(
-            clipper: _OvalBottomClipper(),
-            child: Container(
-              width: double.infinity,
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [AppColors.primaryDark, AppColors.primary],
-                ),
-              ),
-              padding: const EdgeInsets.fromLTRB(20, 48, 20, 48),
-              child: Column(children: [
-                Stack(children: [
+  // ── Header ───────────────────────────────────────────────────────────────
+  Widget _header() {
+    return Container(
+      width: double.infinity,
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [AppColors.primaryDark, AppColors.primary],
+        ),
+        borderRadius: BorderRadius.vertical(bottom: Radius.circular(28)),
+      ),
+      child: SafeArea(
+        bottom: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 22),
+          child: Column(
+            children: [
+              Stack(
+                children: [
                   Container(
-                    width: 96, height: 96,
+                    width: 92,
+                    height: 92,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.5), width: 3),
+                          color: Colors.white.withValues(alpha: 0.45), width: 3),
                     ),
-                    child: ClipOval(child: _buildAvatarView(96)),
+                    child: _buildAvatarView(92),
                   ),
                   Positioned(
-                    bottom: 0, right: 0,
+                    bottom: 0,
+                    right: 0,
                     child: GestureDetector(
-                      onTap: _uploadingAvatar
-                          ? null : _pickAndUploadAvatar,
+                      onTap: _uploadingAvatar ? null : _pickAndUploadAvatar,
                       child: Container(
-                        width: 28, height: 28,
+                        width: 30,
+                        height: 30,
                         decoration: BoxDecoration(
                           color: Colors.white,
                           shape: BoxShape.circle,
                           border: Border.all(
-                              color: AppColors.primaryDark, width: 1.5),
+                              color: AppColors.primaryDark, width: 2),
                         ),
                         child: _uploadingAvatar
-                            ? const Padding(padding: EdgeInsets.all(6),
+                            ? const Padding(
+                                padding: EdgeInsets.all(7),
                                 child: CircularProgressIndicator(
-                                    color: AppColors.primaryDark,
-                                    strokeWidth: 2))
-                            : const Icon(Icons.camera_alt_outlined,
-                                color: AppColors.primaryDark, size: 14),
+                                    color: AppColors.primaryDark, strokeWidth: 2))
+                            : const Icon(Icons.photo_camera_outlined,
+                                color: AppColors.primaryDark, size: 15),
                       ),
                     ),
                   ),
-                ]),
-                const SizedBox(height: 14),
-                Text(_displayName,
-                    style: GoogleFonts.poppins(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 22)),
-                if (_roleLabel.isNotEmpty) ...[
-                  const SizedBox(height: 4),
-                  Text(_roleLabel,
-                      style: GoogleFonts.poppins(
-                          color: Colors.white.withValues(alpha: 0.8),
-                          fontSize: 13)),
                 ],
-                const SizedBox(height: 10),
+              ),
+              const SizedBox(height: 12),
+              Text(_displayName.isEmpty ? 'Your name' : _displayName,
+                  style: GoogleFonts.nunito(
+                      color: Colors.white, fontSize: 21, fontWeight: FontWeight.w900)),
+              if (_roleLabel.isNotEmpty) ...[
+                const SizedBox(height: 7),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(_roleLabel.toUpperCase(),
+                      style: GoogleFonts.nunito(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.5)),
+                ),
+              ],
+              const SizedBox(height: 10),
+              LayoutBuilder(
+                builder: (context, constraints) => ConstrainedBox(
+                  constraints: BoxConstraints(maxWidth: constraints.maxWidth),
+                  child: Wrap(
+                    alignment: WrapAlignment.center,
+                    spacing: 8,
+                    runSpacing: 6,
+                    children: [
+                      if (_metaSecondaryLabel.isNotEmpty)
+                        _metaChip(Icons.school_outlined, _metaSecondaryLabel,
+                            maxWidth: constraints.maxWidth - 32),
+                      _metaChip(
+                          Icons.calendar_today_outlined, 'Joined $_joinedDate'),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
-                // ✅ FIX 1: Constrain pills inside a width-limited container
-                // to prevent the department pill from overflowing the screen.
-                LayoutBuilder(
-                  builder: (context, constraints) => ConstrainedBox(
-                    constraints: BoxConstraints(
-                        maxWidth: constraints.maxWidth),
-                    child: Wrap(
-                      alignment: WrapAlignment.center,
-                      spacing: 8, runSpacing: 6,
+  Widget _metaChip(IconData icon, String label, {double? maxWidth}) => Container(
+        constraints: maxWidth != null ? BoxConstraints(maxWidth: maxWidth) : null,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.18),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: Colors.white, size: 13),
+            const SizedBox(width: 5),
+            Flexible(
+              child: Text(label,
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
+                  style: GoogleFonts.nunito(
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600)),
+            ),
+          ],
+        ),
+      );
+
+  // ── Stats strip ──────────────────────────────────────────────────────────
+  Widget _statsStrip() {
+    Widget item(IconData icon, String value, String label, Color color) =>
+        Expanded(
+          child: Column(
+            children: [
+              Icon(icon, size: 22, color: color),
+              const SizedBox(height: 4),
+              Text(value,
+                  style: GoogleFonts.nunito(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w900,
+                      color: AppColors.textDark)),
+              Text(label,
+                  style: GoogleFonts.nunito(
+                      fontSize: 11, color: AppColors.textLight)),
+            ],
+          ),
+        );
+    Widget divider() => Container(width: 1, height: 40, color: AppColors.border);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+              color: AppColors.primary.withValues(alpha: 0.07),
+              blurRadius: 12,
+              offset: const Offset(0, 2)),
+        ],
+      ),
+      child: Row(
+        children: [
+          item(Icons.emoji_events_rounded, '${_earnedBadges.length}', 'Badges',
+              AppColors.accent),
+          divider(),
+          item(Icons.workspace_premium_outlined, '${_certificates.length}',
+              'Certificates', AppColors.primary),
+          divider(),
+          item(Icons.check_circle_outline_rounded, '$_completedModules',
+              'Modules', AppColors.info),
+        ],
+      ),
+    );
+  }
+
+  // ── Completion nudge ─────────────────────────────────────────────────────
+  Widget _completionNudge() {
+    return GestureDetector(
+      onTap: () => setState(() => _editOpen = true),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: AppColors.primary.withValues(alpha: 0.06),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.primary.withValues(alpha: 0.25)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: AppColors.primary.withValues(alpha: 0.14),
+                borderRadius: BorderRadius.circular(11),
+              ),
+              child: const Icon(Icons.badge_outlined,
+                  color: AppColors.primary, size: 20),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Complete your profile',
+                      style: GoogleFonts.nunito(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.textDark)),
+                  const SizedBox(height: 6),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(999),
+                    child: LinearProgressIndicator(
+                      value: _profileCompletionPct / 100,
+                      minHeight: 6,
+                      backgroundColor: AppColors.border,
+                      valueColor:
+                          const AlwaysStoppedAnimation(AppColors.primary),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text('$_profileCompletionPct% · $_profileCompletionHint',
+                      style: GoogleFonts.nunito(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textLight)),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right_rounded,
+                color: AppColors.primary, size: 20),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Rail section ─────────────────────────────────────────────────────────
+  Widget _railSection({
+    required IconData icon,
+    required String title,
+    required int count,
+    required Color accent,
+    required List<Widget> children,
+    required String emptyText,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          child: Row(
+            children: [
+              Icon(icon, size: 16, color: AppColors.textDark),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(title,
+                    style: GoogleFonts.nunito(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.textDark)),
+              ),
+              if (count > 0)
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(
+                      color: accent.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(10)),
+                  child: Text('$count',
+                      style: GoogleFonts.nunito(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          color: accent)),
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 10),
+        if (children.isEmpty)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 24),
+            decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16)),
+            child: Column(
+              children: [
+                Icon(icon, size: 30, color: AppColors.textLight),
+                const SizedBox(height: 8),
+                Text(emptyText,
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.nunito(
+                        fontSize: 12, color: AppColors.textLight)),
+              ],
+            ),
+          )
+        else
+          SizedBox(
+            height: 132,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.only(bottom: 4),
+              itemCount: children.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 10),
+              itemBuilder: (_, i) => children[i],
+            ),
+          ),
+      ],
+    );
+  }
+
+  // ── Menu group ───────────────────────────────────────────────────────────
+  Widget _menuGroup(String title, List<_MenuItem> items) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(left: 4, bottom: 8),
+          child: Text(title.toUpperCase(),
+              style: GoogleFonts.nunito(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.6,
+                  color: AppColors.textLight)),
+        ),
+        Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                  color: AppColors.primary.withValues(alpha: 0.07),
+                  blurRadius: 12,
+                  offset: const Offset(0, 2)),
+            ],
+          ),
+          child: Column(
+            children: [
+              for (int i = 0; i < items.length; i++) ...[
+                InkWell(
+                  onTap: items[i].onTap,
+                  child: Padding(
+                    padding:
+                        const EdgeInsets.symmetric(vertical: 13, horizontal: 16),
+                    child: Row(
                       children: [
-                        if ((_profileData?['department'] as String? ?? '')
-                            .isNotEmpty)
-                          _InfoPill(
-                              icon: Icons.school_outlined,
-                              label: _profileData!['department'] as String,
-                              // Allow pill text to truncate cleanly
-                              maxWidth: constraints.maxWidth - 32),
-                        _InfoPill(
-                            icon: Icons.calendar_today_outlined,
-                            label: 'Joined $_joinedDate'),
+                        Container(
+                          width: 38,
+                          height: 38,
+                          decoration: BoxDecoration(
+                            color: AppColors.primary.withValues(alpha: 0.09),
+                            borderRadius: BorderRadius.circular(11),
+                          ),
+                          child: Icon(items[i].icon,
+                              size: 20, color: AppColors.primary),
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(items[i].label,
+                                  style: GoogleFonts.nunito(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w700,
+                                      color: AppColors.textDark)),
+                              const SizedBox(height: 2),
+                              Text(items[i].sub,
+                                  style: GoogleFonts.nunito(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w500,
+                                      color: AppColors.textLight)),
+                            ],
+                          ),
+                        ),
+                        const Icon(Icons.chevron_right_rounded,
+                            size: 20, color: AppColors.textLight),
                       ],
                     ),
                   ),
                 ),
-              ]),
-            ),
+                if (i < items.length - 1)
+                  Divider(height: 1, color: AppColors.background, indent: 16, endIndent: 16),
+              ],
+            ],
           ),
+        ),
+      ],
+    );
+  }
 
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-            child: _loading
-                ? const Center(child: Padding(
-                    padding: EdgeInsets.all(40),
-                    child: CircularProgressIndicator(
-                        color: AppColors.primary)))
-                : Column(children: [
-
-                    // Stats
-                    AppCard(child: Row(children: [
-                      _StatItem(
-                          value: '${_earnedBadges.length}',
-                          label: 'Badges',
-                          icon: Icons.emoji_events_rounded,
-                          color: const Color(0xFFF59E0B)),
-                      _vDivider(),
-                      _StatItem(
-                          value: '${_certificates.length}',
-                          label: 'Certificates',
-                          icon: Icons.workspace_premium_outlined,
-                          color: AppColors.primary),
-                      _vDivider(),
-                      _StatItem(
-                          value: '$_completedModules',
-                          label: 'Modules',
-                          icon: Icons.check_circle_outline,
-                          color: AppColors.info),
-                    ])),
-                    const SizedBox(height: 12),
-
-                    // Certificates
-                    _HorizontalSection(
-                      title: 'My Certificates',
-                      titleIcon: Icons.workspace_premium_outlined,
-                      count: _certificates.length,
-                      emptyIcon: Icons.workspace_premium_outlined,
-                      emptyText:
-                          'Complete modules & seminars to earn certificates',
-                      itemCount: _certificates.length,
-                      itemBuilder: (i) => _CertPreviewCard(
-                          cert: _certificates[i],
-                          fullName: _displayName,
-                          onTap: () {}),
-                    ),
-                    const SizedBox(height: 12),
-
-                    // Badges
-                    _HorizontalSection(
-                      title: 'My Badges',
-                      titleIcon: Icons.emoji_events_rounded,
-                      count: _rawBadges.length,
-                      emptyIcon: Icons.emoji_events_outlined,
-                      emptyText: 'Complete assessments to earn badges',
-                      itemCount: _rawBadges.length,
-                      itemBuilder: (i) => _BadgePreviewCard(
-                          rawBadge: _rawBadges[i],
-                          onTap: () => _openBadgeDetail(_rawBadges[i])),
-                    ),
-                    const SizedBox(height: 12),
-
-                    // Menu
-                    AppCard(child: Column(children: [
-                      _MenuRow(
-                        icon: Icons.person_outline_rounded,
-                        label: 'Edit Profile',
-                        onTap: () => setState(() => _editOpen = true),
-                      ),
-                      const Divider(height: 1, color: AppColors.border),
-                      _MenuRow(
-                        icon: Icons.help_outline_rounded,
-                        label: 'Help & Support',
-                        onTap: () => Navigator.push(context,
-                            MaterialPageRoute(
-                                builder: (_) => const HelpScreen())),
-                      ),
-                      const Divider(height: 1, color: AppColors.border),
-                      const SizedBox(height: 8),
-                      SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
-                          onPressed: _handleSignOut,
-                          icon: const Icon(Icons.logout_rounded,
-                              size: 18, color: AppColors.danger),
-                          label: Text('Sign Out',
-                              style: GoogleFonts.poppins(
-                                  color: AppColors.danger,
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 14)),
-                          style: OutlinedButton.styleFrom(
-                            side: const BorderSide(
-                                color: AppColors.danger, width: 1.5),
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(14)),
-                            padding: const EdgeInsets.symmetric(
-                                vertical: 12),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                    ])),
-                    const SizedBox(height: 24),
-                  ]),
-          ),
-        ]),
+  Widget _signOutButton() {
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        onPressed: _handleSignOut,
+        icon: const Icon(Icons.logout_rounded, size: 18, color: AppColors.danger),
+        label: Text('Sign out',
+            style: GoogleFonts.nunito(
+                color: AppColors.danger,
+                fontWeight: FontWeight.w800,
+                fontSize: 14)),
+        style: OutlinedButton.styleFrom(
+          backgroundColor: AppColors.danger.withValues(alpha: 0.06),
+          side: BorderSide(
+              color: AppColors.danger.withValues(alpha: 0.35), width: 1.5),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          padding: const EdgeInsets.symmetric(vertical: 15),
+        ),
       ),
     );
   }
@@ -1262,9 +1665,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
       style: GoogleFonts.poppins(
           fontSize: 12, fontWeight: FontWeight.w600,
           color: AppColors.textMid, letterSpacing: 0.5));
+}
 
-  Widget _vDivider() =>
-      Container(width: 1, height: 40, color: AppColors.border);
+class _MenuItem {
+  final IconData icon;
+  final String label, sub;
+  final VoidCallback onTap;
+  const _MenuItem(this.icon, this.label, this.sub, this.onTap);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1288,53 +1695,6 @@ class _RequiredFieldsHint extends StatelessWidget {
       Expanded(child: Text(text,
           style: GoogleFonts.poppins(
               fontSize: 11, color: AppColors.primary, height: 1.4))),
-    ]),
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  INFO PILL  ✅ FIX 1 APPLIED HERE
-//  Added `maxWidth` parameter so long department names truncate with ellipsis
-//  instead of overflowing off-screen.
-// ─────────────────────────────────────────────────────────────────────────────
-class _InfoPill extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  // Optional max width so text truncates rather than overflows.
-  final double? maxWidth;
-
-  const _InfoPill({
-    required this.icon,
-    required this.label,
-    this.maxWidth,
-  });
-
-  @override
-  Widget build(BuildContext context) => Container(
-    // ✅ Constrain the pill's total width when a maxWidth is supplied.
-    constraints: maxWidth != null
-        ? BoxConstraints(maxWidth: maxWidth!)
-        : null,
-    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-    decoration: BoxDecoration(
-      color: Colors.white.withValues(alpha: 0.18),
-      borderRadius: BorderRadius.circular(20),
-    ),
-    child: Row(mainAxisSize: MainAxisSize.min, children: [
-      Icon(icon, color: Colors.white, size: 12),
-      const SizedBox(width: 5),
-      // ✅ Flexible so the text shrinks/truncates inside the row.
-      Flexible(
-        child: Text(
-          label,
-          style: GoogleFonts.poppins(
-              color: Colors.white,
-              fontSize: 11,
-              fontWeight: FontWeight.w500),
-          overflow: TextOverflow.ellipsis,
-          maxLines: 1,
-        ),
-      ),
     ]),
   );
 }
@@ -1491,282 +1851,137 @@ class _DropdownField<T> extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  OVAL BOTTOM CLIPPER
+//  Preview cards for the certificate / badge rails
 // ─────────────────────────────────────────────────────────────────────────────
-class _OvalBottomClipper extends CustomClipper<Path> {
-  @override
-  Path getClip(Size size) {
-    const arcHeight = 50.0;
-    return Path()
-      ..lineTo(0, 0)
-      ..lineTo(size.width, 0)
-      ..lineTo(size.width, size.height)
-      ..cubicTo(
-        size.width * 0.75, size.height + arcHeight,
-        size.width * 0.25, size.height + arcHeight,
-        0, size.height,
-      )
-      ..close();
-  }
-  @override bool shouldReclip(_OvalBottomClipper old) => false;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  HORIZONTAL SECTION
-// ─────────────────────────────────────────────────────────────────────────────
-class _HorizontalSection extends StatelessWidget {
-  final String title;
-  final IconData titleIcon;
-  final int count;
-  final IconData emptyIcon;
-  final String emptyText;
-  final int itemCount;
-  final Widget Function(int) itemBuilder;
-
-  const _HorizontalSection({
-    required this.title,     required this.titleIcon,
-    required this.count,     required this.emptyIcon,
-    required this.emptyText, required this.itemCount,
-    required this.itemBuilder,
-  });
-
-  @override
-  Widget build(BuildContext context) => AppCard(
-    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Row(children: [
-        Icon(titleIcon, size: 16, color: AppColors.textDark),
-        const SizedBox(width: 6),
-        Expanded(child: Text(title,
-            style: GoogleFonts.poppins(
-                fontSize: 14, fontWeight: FontWeight.w600,
-                color: AppColors.textDark))),
-        if (count > 0)
-          Container(
-            padding: const EdgeInsets.symmetric(
-                horizontal: 8, vertical: 2),
-            decoration: BoxDecoration(
-                color: AppColors.primary.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(10)),
-            child: Text('$count',
-                style: GoogleFonts.poppins(
-                    fontSize: 11, fontWeight: FontWeight.w700,
-                    color: AppColors.primary)),
-          ),
-      ]),
-      const SizedBox(height: 12),
-      if (itemCount == 0)
-        Center(child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 16),
-          child: Column(children: [
-            Icon(emptyIcon, size: 32, color: AppColors.textLight),
-            const SizedBox(height: 8),
-            Text(emptyText,
-                style: GoogleFonts.poppins(
-                    fontSize: 12, color: AppColors.textLight),
-                textAlign: TextAlign.center),
-          ]),
-        ))
-      else
-        // ✅ FIX 2: Increased height from 140 → 150 to eliminate the
-        // bottom 5 px overflow in _CertPreviewCard / _BadgePreviewCard.
-        SizedBox(
-          height: 150,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.only(bottom: 4),
-            itemCount: itemCount,
-            separatorBuilder: (_, __) => const SizedBox(width: 10),
-            itemBuilder: (_, i) => itemBuilder(i),
-          ),
-        ),
-    ]),
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  CERTIFICATE PREVIEW CARD  ✅ FIX 2 APPLIED HERE
-//  Reduced internal spacing and font sizes so the card content fits cleanly
-//  without overflowing its 150 px tall container.
-// ─────────────────────────────────────────────────────────────────────────────
-class _CertPreviewCard extends StatelessWidget {
-  final Map<String, dynamic> cert;
-  final String fullName;
+class ProfileCertPreview extends StatelessWidget {
+  final String title; // already includes "\n" if you want 2 lines
+  final String date;
   final VoidCallback onTap;
-  const _CertPreviewCard(
-      {required this.cert, required this.fullName, required this.onTap});
-
-  String get _title {
-    final r = cert['reference_type'] as String? ?? 'manual';
-    if (r == 'manual') return 'Certificate of\nAchievement';
-    return 'Certificate of\n${r[0].toUpperCase()}${r.substring(1)}';
-  }
-
-  @override
-  Widget build(BuildContext context) => GestureDetector(
-    onTap: onTap,
-    child: Container(
-      width: 110,
-      // ✅ Let the card fill its parent height in the ListView instead of
-      // having its own fixed height that may overflow.
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFC8E6C9), width: 1.5),
-        boxShadow: [BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
-            blurRadius: 6, offset: const Offset(0, 2))],
-      ),
-      padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 48, height: 48,          // ✅ slightly smaller icon box
-            decoration: BoxDecoration(
-                color: const Color(0xFFE8F5E9),
-                borderRadius: BorderRadius.circular(12)),
-            child: const Center(child: Icon(
-                Icons.workspace_premium_rounded,
-                size: 28, color: Color(0xFF2D6A2D))),
-          ),
-          const SizedBox(height: 5),
-          Text(_title,
-              style: GoogleFonts.poppins(
-                  fontSize: 10,              // ✅ 11 → 10 to free up space
-                  fontWeight: FontWeight.w600,
-                  color: const Color(0xFF1A2E1A)),
-              textAlign: TextAlign.center,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis),
-          const SizedBox(height: 2),
-          Text(_fmtDate(cert['issued_at'] as String?),
-              style: GoogleFonts.poppins(
-                  fontSize: 9, color: Colors.grey),
-              textAlign: TextAlign.center),
-        ],
-      ),
-    ),
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  BADGE PREVIEW CARD
-// ─────────────────────────────────────────────────────────────────────────────
-class _BadgePreviewCard extends StatelessWidget {
-  final Map<String, dynamic> rawBadge;
-  final VoidCallback onTap;
-  const _BadgePreviewCard({required this.rawBadge, required this.onTap});
+  const ProfileCertPreview(
+      {super.key, required this.title, required this.date, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    final badge   = rawBadge['badges'] as Map<String, dynamic>? ?? {};
-    final name    = badge['name']     as String? ?? 'Badge';
-    final iconUrl = badge['icon_url'] as String?;
-    final awarded = _fmtDate(rawBadge['awarded_at'] as String?);
-
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        width: 110,
+        width: 120,
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: const Color(0xFFFDE047), width: 1.5),
-          boxShadow: [BoxShadow(
-              color: Colors.black.withValues(alpha: 0.06),
-              blurRadius: 6, offset: const Offset(0, 2))],
+          border: Border.all(color: const Color(0xFFC8E6C9), width: 1.5),
+          boxShadow: [
+            BoxShadow(
+                color: Colors.black.withValues(alpha: 0.06),
+                blurRadius: 6,
+                offset: const Offset(0, 2)),
+          ],
         ),
-        padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
+        padding: const EdgeInsets.all(10),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
-          mainAxisSize: MainAxisSize.min,
           children: [
-          Container(
-            width: 48, height: 48,
-            decoration: BoxDecoration(
-                color: const Color(0xFFFEF9C3),
-                borderRadius: BorderRadius.circular(12)),
-            child: Center(child: iconUrl != null
-                ? ClipRRect(borderRadius: BorderRadius.circular(8),
-                    child: Image.network(iconUrl, width: 30, height: 30,
-                        fit: BoxFit.contain,
-                        errorBuilder: (_, __, ___) => const Icon(
-                            Icons.emoji_events_rounded,
-                            size: 26, color: Color(0xFFF59E0B))))
-                : const Icon(Icons.emoji_events_rounded,
-                    size: 26, color: Color(0xFFF59E0B))),
-          ),
-          const SizedBox(height: 5),
-          Text(name,
-              style: GoogleFonts.poppins(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w600,
-                  color: const Color(0xFF1A2E1A)),
-              textAlign: TextAlign.center,
-              maxLines: 2, overflow: TextOverflow.ellipsis),
-          const SizedBox(height: 2),
-          Text(awarded,
-              style: GoogleFonts.poppins(fontSize: 9, color: Colors.grey),
-              textAlign: TextAlign.center),
-        ]),
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                  color: const Color(0xFFE8F5E9),
+                  borderRadius: BorderRadius.circular(12)),
+              child: const Icon(Icons.workspace_premium_rounded,
+                  size: 28, color: Color(0xFF2D6A2D)),
+            ),
+            const SizedBox(height: 6),
+            Text(title,
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.nunito(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.primaryDark)),
+            const SizedBox(height: 2),
+            Text(date,
+                style: GoogleFonts.nunito(fontSize: 9, color: AppColors.textLight)),
+          ],
+        ),
       ),
     );
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  STAT ITEM
-// ─────────────────────────────────────────────────────────────────────────────
-class _StatItem extends StatelessWidget {
-  final String value, label;
-  final IconData icon;
-  final Color color;
-  const _StatItem({required this.value, required this.label,
-      required this.icon, required this.color});
-
-  @override
-  Widget build(BuildContext context) => Expanded(
-    child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-      Icon(icon, size: 22, color: color),
-      const SizedBox(height: 4),
-      Text(value,
-          style: GoogleFonts.poppins(
-              fontSize: 20, fontWeight: FontWeight.w700,
-              color: AppColors.textDark)),
-      Text(label,
-          style: GoogleFonts.poppins(
-              fontSize: 11, color: AppColors.textLight)),
-    ]),
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  MENU ROW
-// ─────────────────────────────────────────────────────────────────────────────
-class _MenuRow extends StatelessWidget {
-  final IconData icon;
-  final String label;
+class ProfileBadgePreview extends StatelessWidget {
+  final String name;
+  final String? iconUrl;
+  final String date;
   final VoidCallback onTap;
-  const _MenuRow(
-      {required this.icon, required this.label, required this.onTap});
+  const ProfileBadgePreview(
+      {super.key,
+      required this.name,
+      this.iconUrl,
+      required this.date,
+      required this.onTap});
 
   @override
-  Widget build(BuildContext context) => InkWell(
-    onTap: onTap,
-    borderRadius: BorderRadius.circular(10),
-    child: Padding(
-      padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 4),
-      child: Row(children: [
-        Icon(icon, size: 20, color: AppColors.textMid),
-        const SizedBox(width: 14),
-        Expanded(child: Text(label,
-            style: GoogleFonts.poppins(
-                fontSize: 14, fontWeight: FontWeight.w500,
-                color: AppColors.textDark))),
-        const Icon(Icons.chevron_right_rounded,
-            size: 18, color: AppColors.textLight),
-      ]),
-    ),
-  );
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 100,
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: const Color(0xFFFDE047), width: 1.5),
+          boxShadow: [
+            BoxShadow(
+                color: Colors.black.withValues(alpha: 0.06),
+                blurRadius: 6,
+                offset: const Offset(0, 2)),
+          ],
+        ),
+        padding: const EdgeInsets.all(10),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 48,
+              height: 48,
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [Color(0xFFFEF9C3), Color(0xFFFDE68A)],
+                ),
+                borderRadius: BorderRadius.all(Radius.circular(12)),
+              ),
+              child: Center(
+                child: iconUrl != null
+                    ? Image.network(iconUrl!,
+                        width: 30,
+                        height: 30,
+                        fit: BoxFit.contain,
+                        errorBuilder: (_, __, ___) => const Icon(
+                            Icons.emoji_events_rounded,
+                            size: 26,
+                            color: AppColors.primaryDark))
+                    : const Icon(Icons.emoji_events_rounded,
+                        size: 26, color: AppColors.primaryDark),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(name,
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.nunito(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.primaryDark)),
+            const SizedBox(height: 2),
+            Text(date,
+                style: GoogleFonts.nunito(fontSize: 9, color: AppColors.textLight)),
+          ],
+        ),
+      ),
+    );
+  }
 }

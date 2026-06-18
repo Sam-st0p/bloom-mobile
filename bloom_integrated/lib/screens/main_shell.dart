@@ -3,7 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
-import 'home_screen.dart' hide LibraryScreen;
+import 'home_screen.dart';
 import 'library_screen.dart';
 import 'events_screen.dart';
 import 'badges_screen.dart';
@@ -116,9 +116,17 @@ class _MainShellState extends State<MainShell> {
 
     final screens = [
       HomeScreen(
-        onNavigate:  _navigateTo,
-        onBellTap:   _openNotifications,
-        unreadCount: unreadCount,
+        onSwitchTab:         _navigateTo,
+        onOpenNotifications: _openNotifications,
+        unreadCount:         unreadCount,
+        onJoinLive: (seminar) {
+          // Land on the Seminars sub-tab of Events, same as the
+          // notifications "events" result does.
+          setState(() {
+            _eventsInitialTab = 0;
+            _currentIndex     = 2;
+          });
+        },
       ),
       const LibraryScreen(),
       EventsScreen(initialTab: _eventsInitialTab),

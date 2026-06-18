@@ -1,3 +1,5 @@
+// lib/screens/library_screen.dart
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -71,6 +73,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   _LibraryFilters _filters = const _LibraryFilters();
 
+  // Stats strip + "continue" rail — unpaginated, so they stay accurate
+  // regardless of scroll position or active filters.
+  List<ModuleModel> _continueModules = [];
+  int  _completedTotal  = 0;
+  int  _inProgressTotal = 0;
+  int  _badgeCount       = 0;
+  bool _statsLoading     = true;
+
   ModuleModel? _selectedModule;
   Map<String, dynamic>? _selectedRaw;
   List<Map<String, dynamic>> _moduleFiles = [];
@@ -85,10 +95,24 @@ class _LibraryScreenState extends State<LibraryScreen> {
     return cats;
   }
 
+  List<String> get _authors {
+    final authors = _modules
+        .map((m) => m.author ?? '')
+        .where((a) => a.isNotEmpty)
+        .toSet()
+        .toList();
+    authors.sort();
+    return authors;
+  }
+
+  bool get _railVisible =>
+      !_filters.hasActiveFilters && _search.isEmpty && _continueModules.isNotEmpty;
+
   @override
   void initState() {
     super.initState();
     _load();
+    _loadStats();
     _scrollController.addListener(_onScroll);
   }
 
@@ -174,6 +198,71 @@ class _LibraryScreenState extends State<LibraryScreen> {
     }
   }
 
+  // Dedicated, unpaginated fetch for the header stats strip and the
+  // "pick up where you left off" rail.
+  Future<void> _loadStats() async {
+    final userId = _supabase.auth.currentUser?.id;
+    if (userId == null) {
+      if (mounted) setState(() => _statsLoading = false);
+      return;
+    }
+    try {
+      final completedRows = await _supabase
+          .from('module_progress')
+          .select('id')
+          .eq('user_id', userId)
+          .eq('status', 'completed');
+
+      final inProgressRows = await _supabase
+          .from('module_progress')
+          .select('module_id, progress_percent, last_accessed_at')
+          .eq('user_id', userId)
+          .eq('status', 'in_progress')
+          .order('last_accessed_at', ascending: false);
+
+      final badgesData = await _supabase
+          .from('student_badges')
+          .select('id')
+          .eq('user_id', userId);
+
+      // Full module rows are only needed for the handful shown in the rail.
+      final continueModules = <ModuleModel>[];
+      for (final r in (inProgressRows as List).take(5)) {
+        final mid = r['module_id'].toString();
+        final raw = await _supabase
+            .from('modules')
+            .select('*, categories(name), author, published_date, tags')
+            .eq('id', mid)
+            .maybeSingle();
+        if (raw != null) {
+          final pct = (r['progress_percent'] as num?)?.toInt() ?? 0;
+          continueModules.add(ModuleModel.fromMap(raw, progress: pct));
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          _completedTotal   = (completedRows as List).length;
+          _inProgressTotal  = inProgressRows.length;
+          _badgeCount        = (badgesData as List).length;
+          _continueModules   = continueModules;
+          _statsLoading      = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _statsLoading = false);
+    }
+  }
+
+  Future<void> _handleOpen(ModuleModel module) async {
+    final raw = await _supabase
+        .from('modules')
+        .select('author, published_date, tags')
+        .eq('id', module.id)
+        .maybeSingle();
+    _openModule(module, raw ?? {});
+  }
+
   Future<void> _openModule(ModuleModel module, Map<String, dynamic> raw) async {
     setState(() {
       _selectedModule = module;
@@ -228,7 +317,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     builder: (_) => PdfViewerScreen(
         url: url,
         title: file['file_name'] ?? 'Document',
-        onComplete: () => _updateProgress(_selectedModule!.id, 100), // ← add
+        onComplete: () => _updateProgress(_selectedModule!.id, 100),
         )
       )
     );
@@ -246,6 +335,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
         'last_accessed_at': DateTime.now().toIso8601String(),
       }, onConflict: 'user_id,module_id');
       await _load();
+      await _loadStats();
     } catch (_) {}
   }
 
@@ -288,238 +378,351 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   void _clearFilters() => setState(() => _filters = const _LibraryFilters());
 
+  void _showFilterSheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) => _FilterSheet(
+        authors: _authors,
+        currentFilters: _filters,
+        onApply: (f) => setState(() => _filters = f),
+      ),
+    );
+  }
+
+  String _progressLabel(ProgressFilter f) {
+    switch (f) {
+      case ProgressFilter.notStarted: return 'Not Started';
+      case ProgressFilter.inProgress: return 'In Progress';
+      case ProgressFilter.completed:  return 'Completed';
+      default: return 'All';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_selectedModule != null) return _buildModuleDetail(_selectedModule!);
     return _buildLibrary();
   }
 
+  // ── Browse view ─────────────────────────────────────────
   Widget _buildLibrary() {
     return Column(
       children: [
-        Container(
-          color: Colors.white,
-          padding: const EdgeInsets.fromLTRB(20, 20, 20, 14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  const Icon(Icons.local_library_rounded,
-                      color: AppColors.primary, size: 22),
-                  const SizedBox(width: 8),
-                  Text('Module Library',
-                      style: GoogleFonts.nunito(
-                          fontSize: 20,
-                          fontWeight: FontWeight.w900,
-                          color: AppColors.textDark)),
-                  const Spacer(),
-                  GestureDetector(
-                    onTap: _showFilterSheet,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 7),
-                      decoration: BoxDecoration(
-                        color: _filters.hasActiveFilters
-                            ? AppColors.primary.withValues(alpha: 0.1)
-                            : AppColors.background,
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(
-                            color: _filters.hasActiveFilters
-                                ? AppColors.primary
-                                : AppColors.border,
-                            width: 1.5),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.tune_rounded,
-                              size: 16,
-                              color: _filters.hasActiveFilters
-                                  ? AppColors.primary
-                                  : AppColors.textMid),
-                          const SizedBox(width: 5),
-                          Text('Filter',
-                              style: GoogleFonts.nunito(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w700,
-                                  color: _filters.hasActiveFilters
-                                      ? AppColors.primary
-                                      : AppColors.textMid)),
-                          if (_activeFilterCount > 0) ...[
-                            const SizedBox(width: 5),
-                            Container(
-                              width: 17,
-                              height: 17,
-                              decoration: const BoxDecoration(
-                                  color: AppColors.primary,
-                                  shape: BoxShape.circle),
-                              child: Center(
-                                child: Text('$_activeFilterCount',
-                                    style: GoogleFonts.nunito(
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.w800,
-                                        color: Colors.white)),
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _searchCtrl,
-                onChanged: (v) => setState(() => _search = v),
-                style: GoogleFonts.nunito(
-                    fontSize: 14, color: AppColors.textDark),
-                decoration: InputDecoration(
-                  hintText: 'Search modules...',
-                  hintStyle:
-                      GoogleFonts.nunito(color: AppColors.textLight),
-                  prefixIcon: const Icon(Icons.search,
-                      color: AppColors.textLight, size: 20),
-                  suffixIcon: _search.isNotEmpty
-                      ? IconButton(
-                          icon: const Icon(Icons.close,
-                              color: AppColors.textLight, size: 18),
-                          onPressed: () {
-                            _searchCtrl.clear();
-                            setState(() => _search = '');
-                          })
-                      : null,
-                  filled: true,
-                  fillColor: AppColors.background,
-                  border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(14),
-                      borderSide: BorderSide.none),
-                  enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(14),
-                      borderSide: const BorderSide(
-                          color: AppColors.border, width: 1.5)),
-                  contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 12),
-                ),
-              ),
-            ],
-          ),
-        ),
-
-        if (_filters.hasActiveFilters) _buildActiveFiltersRow(),
-
-        if (!_loading)
-          Container(
-            color: AppColors.background,
-            padding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-            child: Row(children: [
-              Text('${_filtered.length} of ${_modules.length} modules',
-                  style: GoogleFonts.nunito(
-                      fontSize: 12, color: AppColors.textLight)),
-            ]),
-          ),
-
+        _header(),
         Expanded(
           child: _loading
-              ? const Center(
-                  child: CircularProgressIndicator(
-                      color: AppColors.primary))
+              ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
               : RefreshIndicator(
-                  onRefresh: _load,
-                  child: _filtered.isEmpty
-                      ? ListView(children: [
-                          const SizedBox(height: 80),
-                          Center(
-                            child: Column(children: [
-                              Icon(
-                                _filters.hasActiveFilters ||
-                                        _search.isNotEmpty
-                                    ? Icons.search_off_rounded
-                                    : Icons.menu_book_outlined,
-                                size: 48,
-                                color: AppColors.textLight,
-                              ),
+                  onRefresh: () async {
+                    await _load();
+                    await _loadStats();
+                  },
+                  child: SingleChildScrollView(
+                    controller: _scrollController,
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (_railVisible) _continueRail(),
+                        _statusBar(),
+                        _categoryBar(),
+                        if (_filters.hasActiveFilters) _buildActiveFiltersRow(),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('${_filtered.length} of ${_modules.length} loaded modules',
+                                  style: GoogleFonts.nunito(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                      color: AppColors.textLight)),
                               const SizedBox(height: 12),
-                              Text(
-                                _filters.hasActiveFilters ||
-                                        _search.isNotEmpty
-                                    ? 'No modules match your filters'
-                                    : 'No modules found',
-                                style: GoogleFonts.nunito(
-                                    color: AppColors.textLight,
-                                    fontWeight: FontWeight.w700),
-                              ),
-                              if (_filters.hasActiveFilters) ...[
-                                const SizedBox(height: 8),
-                                TextButton(
-                                  onPressed: _clearFilters,
-                                  child: Text('Clear filters',
-                                      style: GoogleFonts.nunito(
-                                          color: AppColors.primary,
-                                          fontWeight: FontWeight.w700)),
+                              if (_filtered.isEmpty)
+                                _emptyState()
+                              else
+                                ..._filtered.map((m) => Padding(
+                                      padding: const EdgeInsets.only(bottom: 12),
+                                      child: _ModuleCard(
+                                        module: m,
+                                        onOpen: () => _handleOpen(m),
+                                      ),
+                                    )),
+                              if (_loadingMore)
+                                const Padding(
+                                  padding: EdgeInsets.symmetric(vertical: 16),
+                                  child: Center(
+                                      child: CircularProgressIndicator(
+                                          color: AppColors.primary, strokeWidth: 2)),
                                 ),
-                              ],
-                            ]),
-                          ),
-                        ])
-                      : ListView.separated(
-                          controller: _scrollController,
-                          padding: const EdgeInsets.all(16),
-                          itemCount: _filtered.length +
-                              (_loadingMore ? 1 : 0) +
-                              (!_hasMore &&
-                                      _modules.isNotEmpty &&
-                                      _search.isEmpty &&
-                                      !_filters.hasActiveFilters
-                                  ? 1
-                                  : 0),
-                          separatorBuilder: (_, __) =>
-                              const SizedBox(height: 12),
-                          itemBuilder: (ctx, i) {
-                            if (i == _filtered.length && _loadingMore) {
-                              return const Padding(
-                                padding: EdgeInsets.symmetric(vertical: 16),
-                                child: Center(
-                                    child: CircularProgressIndicator(
-                                        color: AppColors.primary,
-                                        strokeWidth: 2)),
-                              );
-                            }
-                            if (i == _filtered.length && !_hasMore) {
-                              return Padding(
-                                padding: const EdgeInsets.symmetric(
-                                    vertical: 16),
-                                child: Center(
-                                    child: Text(
-                                        'All ${_modules.length} modules loaded',
+                              if (!_hasMore &&
+                                  _modules.isNotEmpty &&
+                                  _search.isEmpty &&
+                                  !_filters.hasActiveFilters)
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(vertical: 16),
+                                  child: Center(
+                                    child: Text('All ${_modules.length} modules loaded',
                                         style: GoogleFonts.nunito(
-                                            fontSize: 12,
-                                            color: AppColors.textLight))),
-                              );
-                            }
-                            final module = _filtered[i];
-                            return _ModuleCard(
-                              module: module,
-                              onTap: () async {
-                                final raw = await _supabase
-                                    .from('modules')
-                                    .select('author, published_date, tags')
-                                    .eq('id', module.id)
-                                    .maybeSingle();
-                                _openModule(module, raw ?? {});
-                              },
-                            );
-                          },
+                                            fontSize: 12, color: AppColors.textLight)),
+                                  ),
+                                ),
+                            ],
+                          ),
                         ),
+                      ],
+                    ),
+                  ),
                 ),
         ),
       ],
     );
   }
 
-  // ── Active filters row ─────────────────────────────────
+  // ── Header: title, stats strip, search + filter trigger ──
+  Widget _header() {
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [AppColors.primaryDark, AppColors.primary],
+        ),
+        borderRadius: BorderRadius.vertical(bottom: Radius.circular(24)),
+      ),
+      child: SafeArea(
+        bottom: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 18),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Library',
+                  style: GoogleFonts.nunito(
+                      color: Colors.white, fontSize: 22, fontWeight: FontWeight.w900)),
+              const SizedBox(height: 4),
+              Text('Learning modules & resources',
+                  style: GoogleFonts.nunito(
+                      color: Colors.white.withValues(alpha: 0.75),
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500)),
+              const SizedBox(height: 14),
+              _statsLoading
+                  ? const SizedBox(height: 62)
+                  : Row(children: [
+                      _stat(Icons.task_alt_rounded, '$_completedTotal', 'Completed'),
+                      const SizedBox(width: 10),
+                      _stat(Icons.autorenew_rounded, '$_inProgressTotal', 'In progress'),
+                      const SizedBox(width: 10),
+                      _stat(Icons.workspace_premium_rounded, '$_badgeCount', 'Badges'),
+                    ]),
+              const SizedBox(height: 14),
+              _searchBar(),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _stat(IconData icon, String value, String label) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.14),
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Column(children: [
+          Icon(icon, color: Colors.white, size: 18),
+          const SizedBox(height: 2),
+          Text(value,
+              style: GoogleFonts.nunito(
+                  color: Colors.white, fontSize: 16, fontWeight: FontWeight.w900)),
+          Text(label,
+              style: GoogleFonts.nunito(
+                  color: Colors.white.withValues(alpha: 0.75),
+                  fontSize: 9,
+                  fontWeight: FontWeight.w600)),
+        ]),
+      ),
+    );
+  }
+
+  Widget _searchBar() {
+    final moreFiltersActive =
+        _filters.author != null || _filters.dateFrom != null || _filters.dateTo != null;
+    return Container(
+      height: 44,
+      padding: const EdgeInsets.symmetric(horizontal: 14),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(children: [
+        Icon(Icons.search_rounded, color: Colors.white.withValues(alpha: 0.85), size: 20),
+        const SizedBox(width: 10),
+        Expanded(
+          child: TextField(
+            controller: _searchCtrl,
+            onChanged: (v) => setState(() => _search = v),
+            style: GoogleFonts.nunito(
+                color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500),
+            cursorColor: Colors.white,
+            decoration: InputDecoration(
+              isDense: true,
+              border: InputBorder.none,
+              hintText: 'Search modules',
+              hintStyle: GoogleFonts.nunito(
+                  color: Colors.white.withValues(alpha: 0.7),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500),
+            ),
+          ),
+        ),
+        if (_search.isNotEmpty)
+          GestureDetector(
+            onTap: () {
+              _searchCtrl.clear();
+              setState(() => _search = '');
+            },
+            child: Icon(Icons.close_rounded, color: Colors.white.withValues(alpha: 0.85), size: 18),
+          ),
+        const SizedBox(width: 10),
+        GestureDetector(
+          onTap: _showFilterSheet,
+          child: Stack(clipBehavior: Clip.none, children: [
+            Icon(Icons.tune_rounded, color: Colors.white.withValues(alpha: 0.9), size: 20),
+            if (moreFiltersActive)
+              Positioned(
+                top: -2,
+                right: -2,
+                child: Container(
+                  width: 8,
+                  height: 8,
+                  decoration: const BoxDecoration(color: AppColors.accent, shape: BoxShape.circle),
+                ),
+              ),
+          ]),
+        ),
+      ]),
+    );
+  }
+
+  // ── "Pick up where you left off" rail ─────────────────────
+  Widget _continueRail() {
+    return Padding(
+      padding: const EdgeInsets.only(top: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 0, 16, 10),
+            child: _RailTitle('Pick up where you left off'),
+          ),
+          SizedBox(
+            height: 132,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              itemCount: _continueModules.take(5).length,
+              separatorBuilder: (_, __) => const SizedBox(width: 12),
+              itemBuilder: (_, i) => _ResumeCard(
+                module: _continueModules[i],
+                onTap: () => _handleOpen(_continueModules[i]),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Status segmented control (replaces the old Progress section of
+  //    the filter sheet) ─────────────────────────────────────
+  Widget _statusBar() {
+    const options = [
+      ProgressFilter.all,
+      ProgressFilter.inProgress,
+      ProgressFilter.completed,
+      ProgressFilter.notStarted,
+    ];
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: options.map((f) {
+            final active = _filters.progress == f;
+            return Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: GestureDetector(
+                onTap: () => setState(() => _filters = _filters.copyWith(progress: f)),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: active ? AppColors.primary : Colors.white,
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(
+                        color: active ? AppColors.primary : AppColors.border, width: 1.5),
+                  ),
+                  child: Text(_progressLabel(f),
+                      style: GoogleFonts.nunito(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: active ? Colors.white : AppColors.textMid)),
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+      ),
+    );
+  }
+
+  // ── Category chips (secondary, replaces the old Category section of
+  //    the filter sheet) ─────────────────────────────────────
+  Widget _categoryBar() {
+    final cats = ['All', ..._categories];
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: cats.map((c) {
+            final active =
+                c == 'All' ? _filters.categoryName == null : _filters.categoryName == c;
+            return Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: GestureDetector(
+                onTap: () => setState(
+                    () => _filters = _filters.copyWith(categoryName: c == 'All' ? null : c)),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: active
+                        ? AppColors.primary.withValues(alpha: 0.14)
+                        : Colors.transparent,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(c,
+                      style: GoogleFonts.nunito(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: active ? AppColors.primaryDark : AppColors.textLight)),
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+      ),
+    );
+  }
+
+  // ── Active filters row (progress / category / author / date chips,
+  //    whichever are set, regardless of which control set them) ──────
   Widget _buildActiveFiltersRow() {
     return Container(
       color: Colors.white,
@@ -581,40 +784,33 @@ class _LibraryScreenState extends State<LibraryScreen> {
     );
   }
 
-  List<String> get _authors {
-    final authors = _modules
-        .map((m) => m.author ?? '')
-        .where((a) => a.isNotEmpty)
-        .toSet()
-        .toList();
-    authors.sort();
-    return authors;
-  }
-
-  void _showFilterSheet() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (_) => _FilterSheet(
-        categories: _categories,
-        authors: _authors,
-        currentFilters: _filters,
-        onApply: (f) => setState(() => _filters = f),
-      ),
+  Widget _emptyState() {
+    final filtered = _filters.hasActiveFilters || _search.isNotEmpty;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 40),
+      alignment: Alignment.center,
+      child: Column(children: [
+        Icon(filtered ? Icons.search_off_rounded : Icons.menu_book_outlined,
+            color: AppColors.textLight, size: 36),
+        const SizedBox(height: 8),
+        Text(filtered ? 'No modules match your filters' : 'No modules found',
+            style: GoogleFonts.nunito(
+                fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textLight)),
+        if (_filters.hasActiveFilters) ...[
+          const SizedBox(height: 8),
+          TextButton(
+            onPressed: _clearFilters,
+            child: Text('Clear filters',
+                style: GoogleFonts.nunito(
+                    color: AppColors.primary, fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ]),
     );
   }
 
-  String _progressLabel(ProgressFilter f) {
-    switch (f) {
-      case ProgressFilter.notStarted: return 'Not Started';
-      case ProgressFilter.inProgress: return 'In Progress';
-      case ProgressFilter.completed:  return 'Completed';
-      default: return 'All';
-    }
-  }
-
-  // ── Module Detail View ─────────────────────────────────
+  // ── Module Detail View (unchanged from the previous screen) ───────
   Widget _buildModuleDetail(ModuleModel module) {
     final progress = _progressMap[module.id] ?? 0;
     final raw      = _selectedRaw ?? {};
@@ -815,6 +1011,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                           onComplete: () {
                             Navigator.pop(context);
                             _load();
+                            _loadStats();
                           },
                         ),
                       ),
@@ -859,6 +1056,285 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 }
 
+// ── Rail section title ─────────────────────────────────────
+class _RailTitle extends StatelessWidget {
+  final String text;
+  const _RailTitle(this.text);
+  @override
+  Widget build(BuildContext context) => Text(text,
+      style: GoogleFonts.nunito(
+          fontSize: 14, fontWeight: FontWeight.w800, color: AppColors.textDark));
+}
+
+// ── Resume card (rail) ──────────────────────────────────────
+class _ResumeCard extends StatelessWidget {
+  final ModuleModel module;
+  final VoidCallback onTap;
+  const _ResumeCard({required this.module, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 220,
+        decoration: BoxDecoration(
+          color: AppColors.card,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.06),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [AppColors.primaryDark, AppColors.primary],
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.22),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(module.category,
+                        style: GoogleFonts.nunito(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                        )),
+                  ),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    height: 34,
+                    child: Text(module.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.nunito(
+                          color: Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
+                          height: 1.3,
+                        )),
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                children: [
+                  AppProgressBar(value: module.progress, color: AppColors.accent),
+                  const SizedBox(height: 6),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text('${module.progress}% complete',
+                          style: GoogleFonts.nunito(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.textLight,
+                          )),
+                      Row(
+                        children: [
+                          Text('Resume',
+                              style: GoogleFonts.nunito(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w800,
+                                color: AppColors.primary,
+                              )),
+                          const Icon(Icons.play_arrow_rounded,
+                              color: AppColors.primary, size: 13),
+                        ],
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Full module card ────────────────────────────────────────
+class _ModuleCard extends StatelessWidget {
+  final ModuleModel module;
+  final VoidCallback onOpen;
+  const _ModuleCard({required this.module, required this.onOpen});
+
+  String get _statusLabel =>
+      module.progress == 100 ? 'Completed' : module.progress > 0 ? 'In progress' : 'Not started';
+
+  Color get _statusColor {
+    if (module.progress == 100) return AppColors.primary;
+    if (module.progress > 0) return AppColors.accent;
+    return AppColors.textLight;
+  }
+
+  ({String label, IconData icon}) get _action {
+    if (module.progress == 100) return (label: 'Review', icon: Icons.check_rounded);
+    if (module.progress > 0) return (label: 'Resume module', icon: Icons.play_arrow_rounded);
+    return (label: 'Start module', icon: Icons.arrow_forward_rounded);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final notStarted = module.progress == 0;
+    final completed  = module.progress == 100;
+    final act         = _action;
+    final color       = Color(module.colorValue);
+
+    return AppCard(
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Container(
+                    width: 56,
+                    height: 56,
+                    decoration: BoxDecoration(
+                      color: color.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Icon(Icons.menu_book_outlined, color: color, size: 26),
+                  ),
+                  if (completed)
+                    Positioned(
+                      top: -5,
+                      right: -5,
+                      child: Container(
+                        width: 22,
+                        height: 22,
+                        decoration: BoxDecoration(
+                          color: AppColors.primary,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 2),
+                        ),
+                        child: const Icon(Icons.check_rounded,
+                            color: Colors.white, size: 13),
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: Text(module.category,
+                              overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.nunito(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.primaryLight,
+                              )),
+                        ),
+                        BadgeChip(label: _statusLabel, color: _statusColor),
+                      ],
+                    ),
+                    const SizedBox(height: 5),
+                    Text(module.title,
+                        style: GoogleFonts.nunito(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.textDark,
+                          height: 1.3,
+                        )),
+                    if ((module.author ?? '').isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Row(children: [
+                        const Icon(Icons.person_outline,
+                            color: AppColors.textLight, size: 14),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: Text(module.author!,
+                              overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.nunito(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w500,
+                                color: AppColors.textLight,
+                              )),
+                        ),
+                      ]),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+          if (module.progress > 0 && module.progress < 100) ...[
+            const SizedBox(height: 12),
+            AppProgressBar(value: module.progress, color: AppColors.accent),
+            const SizedBox(height: 4),
+            Text('${module.progress}% complete',
+                style: GoogleFonts.nunito(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w500,
+                  color: AppColors.textLight,
+                )),
+          ],
+          const SizedBox(height: 12),
+          GestureDetector(
+            onTap: onOpen,
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 11),
+              decoration: BoxDecoration(
+                color: notStarted
+                    ? AppColors.background
+                    : _statusColor.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(act.icon,
+                      size: 16,
+                      color: notStarted ? AppColors.primaryDark : _statusColor),
+                  const SizedBox(width: 7),
+                  Text(act.label,
+                      style: GoogleFonts.nunito(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                        color: notStarted ? AppColors.primaryDark : _statusColor,
+                      )),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 // ── Metadata chip ──────────────────────────────────────────
 class _MetaChip extends StatelessWidget {
   final IconData icon;
@@ -870,14 +1346,14 @@ class _MetaChip extends StatelessWidget {
     return Row(mainAxisSize: MainAxisSize.min, children: [
       Icon(icon, size: 13, color: AppColors.primary),
       const SizedBox(width: 5),
-      Flexible(                          // ← wrap in Flexible
+      Flexible(
         child: Text(
           label,
           style: GoogleFonts.nunito(
               fontSize: 12,
               color: AppColors.textMid,
               fontWeight: FontWeight.w600),
-          softWrap: true,                // ← allow wrapping
+          softWrap: true,
         ),
       ),
     ]);
@@ -953,14 +1429,13 @@ class _ActiveChipWithIcon extends StatelessWidget {
   }
 }
 
-// ── Filter bottom sheet ────────────────────────────────────
+// ── Filter bottom sheet — Author + Date Range only now; Progress and
+//    Category are set inline on the browse screen (status pills / chips) ──
 class _FilterSheet extends StatefulWidget {
-  final List<String> categories;
   final List<String> authors;
   final _LibraryFilters currentFilters;
   final ValueChanged<_LibraryFilters> onApply;
   const _FilterSheet({
-    required this.categories,
     required this.authors,
     required this.currentFilters,
     required this.onApply,
@@ -991,7 +1466,6 @@ class _FilterSheetState extends State<_FilterSheet> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // ── Drag handle + header (pinned) ──
           Padding(
             padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
             child: Column(
@@ -1007,15 +1481,15 @@ class _FilterSheetState extends State<_FilterSheet> {
                 ),
                 const SizedBox(height: 20),
                 Row(children: [
-                  Text('Filter Modules',
+                  Text('More Filters',
                       style: GoogleFonts.nunito(
                           fontSize: 18,
                           fontWeight: FontWeight.w900,
                           color: AppColors.textDark)),
                   const Spacer(),
                   TextButton(
-                    onPressed: () =>
-                        setState(() => _local = const _LibraryFilters()),
+                    onPressed: () => setState(() => _local = _local.copyWith(
+                        author: null, dateFrom: null, dateTo: null)),
                     child: Text('Reset',
                         style: GoogleFonts.nunito(
                             color: AppColors.primary,
@@ -1026,78 +1500,14 @@ class _FilterSheetState extends State<_FilterSheet> {
             ),
           ),
 
-          // ── Scrollable filter options ──
           Flexible(
             child: SingleChildScrollView(
               padding: const EdgeInsets.fromLTRB(24, 18, 24, 0),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Progress
-                  Text('Progress',
-                      style: GoogleFonts.nunito(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w800,
-                          color: AppColors.textMid)),
-                  const SizedBox(height: 10),
-                  Wrap(spacing: 8, runSpacing: 8, children: [
-                    _SheetChip(
-                      label: 'All',
-                      selected: _local.progress == ProgressFilter.all,
-                      onTap: () => setState(() => _local =
-                          _local.copyWith(progress: ProgressFilter.all)),
-                    ),
-                    _SheetChip(
-                      label: 'Not Started',
-                      icon: Icons.radio_button_unchecked,
-                      selected: _local.progress == ProgressFilter.notStarted,
-                      onTap: () => setState(() => _local =
-                          _local.copyWith(progress: ProgressFilter.notStarted)),
-                    ),
-                    _SheetChip(
-                      label: 'In Progress',
-                      icon: Icons.pending_rounded,
-                      selected: _local.progress == ProgressFilter.inProgress,
-                      onTap: () => setState(() => _local =
-                          _local.copyWith(progress: ProgressFilter.inProgress)),
-                    ),
-                    _SheetChip(
-                      label: 'Completed',
-                      icon: Icons.check_circle_outline_rounded,
-                      selected: _local.progress == ProgressFilter.completed,
-                      onTap: () => setState(() => _local =
-                          _local.copyWith(progress: ProgressFilter.completed)),
-                    ),
-                  ]),
-
-                  // Category
-                  if (widget.categories.isNotEmpty) ...[
-                    const SizedBox(height: 20),
-                    Text('Category',
-                        style: GoogleFonts.nunito(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w800,
-                            color: AppColors.textMid)),
-                    const SizedBox(height: 10),
-                    Wrap(spacing: 8, runSpacing: 8, children: [
-                      _SheetChip(
-                        label: 'All',
-                        selected: _local.categoryName == null,
-                        onTap: () => setState(() =>
-                            _local = _local.copyWith(categoryName: null)),
-                      ),
-                      ...widget.categories.map((cat) => _SheetChip(
-                            label: cat,
-                            selected: _local.categoryName == cat,
-                            onTap: () => setState(() =>
-                                _local = _local.copyWith(categoryName: cat)),
-                          )),
-                    ]),
-                  ],
-
                   // Author
                   if (widget.authors.isNotEmpty) ...[
-                    const SizedBox(height: 20),
                     Text('Author',
                         style: GoogleFonts.nunito(
                             fontSize: 13,
@@ -1119,10 +1529,10 @@ class _FilterSheetState extends State<_FilterSheet> {
                                 () => _local = _local.copyWith(author: a)),
                           )),
                     ]),
+                    const SizedBox(height: 20),
                   ],
 
                   // Date Range
-                  const SizedBox(height: 20),
                   Text('Publication Date Range',
                       style: GoogleFonts.nunito(
                           fontSize: 13,
@@ -1297,7 +1707,6 @@ class _FilterSheetState extends State<_FilterSheet> {
             ),
           ),
 
-          // ── Apply button — pinned, never clipped ──
           Padding(
             padding: const EdgeInsets.fromLTRB(24, 8, 24, 32),
             child: SizedBox(
@@ -1374,78 +1783,6 @@ class _SheetChip extends StatelessWidget {
                       ? AppColors.primary
                       : AppColors.textMid)),
         ]),
-      ),
-    );
-  }
-}
-
-// ── Module Card ────────────────────────────────────────────
-class _ModuleCard extends StatelessWidget {
-  final ModuleModel module;
-  final VoidCallback onTap;
-  const _ModuleCard({required this.module, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final color = Color(module.colorValue);
-    return GestureDetector(
-      onTap: onTap,
-      child: AppCard(
-        child: Row(
-          children: [
-            Container(
-              width: 52,
-              height: 52,
-              decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(14)),
-              child: Icon(Icons.menu_book_outlined, color: color, size: 24),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(module.title,
-                      style: GoogleFonts.nunito(
-                          fontWeight: FontWeight.w800,
-                          fontSize: 14,
-                          color: AppColors.textDark),
-                      overflow: TextOverflow.ellipsis),
-                  const SizedBox(height: 4),
-                  Text(module.category,
-                      style: GoogleFonts.nunito(
-                          fontSize: 12, color: AppColors.textLight)),
-                  const SizedBox(height: 8),
-                  AppProgressBar(value: module.progress, color: color),
-                  const SizedBox(height: 4),
-                  Row(children: [
-                    if (module.progress == 100) ...[
-                      const Icon(Icons.check_circle,
-                          size: 11, color: AppColors.primary),
-                      const SizedBox(width: 3),
-                    ],
-                    Text(
-                      module.progress == 100
-                          ? 'Completed'
-                          : module.progress == 0
-                              ? 'Not started'
-                              : '${module.progress}% complete',
-                      style: GoogleFonts.nunito(
-                          fontSize: 11,
-                          color: module.progress == 100
-                              ? AppColors.primary
-                              : AppColors.textLight),
-                    ),
-                  ]),
-                ],
-              ),
-            ),
-            const SizedBox(width: 8),
-            const Icon(Icons.chevron_right,
-                color: AppColors.textLight, size: 18),
-          ],
-        ),
       ),
     );
   }
@@ -1587,7 +1924,6 @@ class _ExpandableDescriptionState extends State<_ExpandableDescription> {
   @override
   void initState() {
     super.initState();
-    // Check if text actually overflows after layout
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final tp = TextPainter(
@@ -1599,7 +1935,7 @@ class _ExpandableDescriptionState extends State<_ExpandableDescription> {
         maxLines: _collapsedMaxLines,
         textDirection: TextDirection.ltr,
       )..layout(
-          maxWidth: MediaQuery.of(context).size.width - 72, // card padding
+          maxWidth: MediaQuery.of(context).size.width - 72,
         );
       if (tp.didExceedMaxLines && mounted) {
         setState(() => _isOverflowing = true);
