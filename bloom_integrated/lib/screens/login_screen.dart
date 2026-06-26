@@ -21,7 +21,7 @@ import '../services/auth_service.dart';
 class LoginScreen extends StatefulWidget {
   /// Called after successful email/password sign-in.
   /// AuthGate's onAuthStateChange handles navigation from here.
-  final VoidCallback onLogin;
+  final void Function(String email) onLogin;
 
   /// Called after Google sign-in succeeds. Skips role selection (guest).
   final VoidCallback onGuestLogin;
@@ -84,7 +84,7 @@ class _LoginScreenState extends State<LoginScreen> {
     }
 
     // Auth state listener in AuthGate takes it from here.
-    widget.onLogin();
+    widget.onLogin(AppValidators.normalizeEmail(_emailCtrl.text));
   }
 
   // ── Google sign-in → guest role ───────────────────────────────────────────

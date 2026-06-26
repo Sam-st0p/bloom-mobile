@@ -57,7 +57,7 @@ class BloomApp extends StatelessWidget {
 enum _AuthStatus {
   loading,
   unauthenticated,
-  needsRole,        // CvSU email user — must pick Student/Teacher/Faculty
+  needsRole,
   authenticated,
   passwordRecovery,
   deactivated,
@@ -214,8 +214,17 @@ class _AuthGateState extends State<AuthGate> {
         }
 
         if (event == AuthChangeEvent.signedOut) {
-          _stopDeactivationWatcher();
-          if (mounted) setState(() => _status = _AuthStatus.unauthenticated);
+          // ── KEY FIX ────────────────────────────────────────────────
+          // Do NOT react to signedOut while _AuthNavigator is showing
+          // the OTP screen. AuthService.signIn() signs out locally after
+          // credential check — that signedOut event must be ignored here.
+          // We only reset to unauthenticated if AuthGate itself is
+          // already showing the main app (authenticated/needsRole).
+          if (_status == _AuthStatus.authenticated ||
+              _status == _AuthStatus.needsRole) {
+            _stopDeactivationWatcher();
+            if (mounted) setState(() => _status = _AuthStatus.unauthenticated);
+          }
           return;
         }
       },
@@ -225,14 +234,6 @@ class _AuthGateState extends State<AuthGate> {
     );
   }
 
-  // ── Resolve what screen to show after a successful sign-in ───────────────
-  //
-  // Rules:
-  //   • Deactivated           → _AuthStatus.deactivated
-  //   • role is null/empty    → _AuthStatus.needsRole   (CvSU users only)
-  //   • role == 'guest'       → _AuthStatus.authenticated (skip role screen)
-  //   • any other role set    → _AuthStatus.authenticated
-  //
   Future<void> _resolveAuthenticatedStatus() async {
     final myCheckId = ++_checkId;
     final user = _supabase.auth.currentUser;
@@ -252,7 +253,6 @@ class _AuthGateState extends State<AuthGate> {
 
       if (!mounted || myCheckId != _checkId) return;
 
-      // Block deactivated accounts immediately
       if (profile != null && profile['is_active'] == false) {
         _stopDeactivationWatcher();
         await _supabase.auth.signOut();
@@ -265,10 +265,8 @@ class _AuthGateState extends State<AuthGate> {
       final role = (profile?['role'] as String? ?? '').trim();
 
       if (role.isEmpty) {
-        // CvSU email user who hasn't picked a role yet
         if (mounted) setState(() => _status = _AuthStatus.needsRole);
       } else {
-        // Guest (Google) or any set role → go straight to app
         if (mounted) setState(() => _status = _AuthStatus.authenticated);
       }
     } catch (_) {
@@ -278,21 +276,16 @@ class _AuthGateState extends State<AuthGate> {
     }
   }
 
-  // ── Callbacks passed down to screens ─────────────────────────────────────
-
-  /// CvSU email login/signup verified via OTP → may still need role selection
   void _handleOtpVerified() {
-    // _resolveAuthenticatedStatus will be triggered by the signedIn auth event
-    // automatically. Nothing needed here — AuthGate reacts on its own.
+    // AuthGate's auth stream handles navigation automatically on signedIn.
   }
 
-  /// Google login or Google signup → role already set to 'guest', go to app
   void _handleGuestAuth() {
     setState(() => _status = _AuthStatus.authenticated);
   }
 
   void _handleRoleSelected()  => setState(() => _status = _AuthStatus.authenticated);
-  void _handleSignOut()       {
+  void _handleSignOut() {
     _stopDeactivationWatcher();
     setState(() => _status = _AuthStatus.unauthenticated);
   }
@@ -309,9 +302,9 @@ class _AuthGateState extends State<AuthGate> {
 
         _AuthStatus.unauthenticated =>
           _AuthNavigator(
-            key:            const ValueKey('authNav'),
-            onGuestAuth:    _handleGuestAuth,
-            onOtpVerified:  _handleOtpVerified,
+            key:           const ValueKey('authNav'),
+            onGuestAuth:   _handleGuestAuth,
+            onOtpVerified: _handleOtpVerified,
           ),
 
         _AuthStatus.needsRole =>
@@ -385,23 +378,18 @@ class _DeactivatedScreen extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 24),
-                const Text(
-                  'Account Deactivated',
-                  style: TextStyle(
-                    fontSize: 22, fontWeight: FontWeight.w800,
-                    color: Color(0xFF1A2E1A),
-                  ),
-                  textAlign: TextAlign.center,
-                ),
+                const Text('Account Deactivated',
+                    style: TextStyle(
+                        fontSize: 22, fontWeight: FontWeight.w800,
+                        color: Color(0xFF1A2E1A)),
+                    textAlign: TextAlign.center),
                 const SizedBox(height: 12),
                 const Text(
                   'Your account has been deactivated by an administrator.\n\n'
                   'Please contact your administrator for assistance.',
                   style: TextStyle(
-                    fontSize: 14, color: Color(0xFF6B7280), height: 1.6,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
+                      fontSize: 14, color: Color(0xFF6B7280), height: 1.6),
+                  textAlign: TextAlign.center),
                 const SizedBox(height: 32),
                 SizedBox(
                   width: double.infinity,
@@ -412,8 +400,7 @@ class _DeactivatedScreen extends StatelessWidget {
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10)),
-                    ),
+                          borderRadius: BorderRadius.circular(10))),
                     child: const Text('OK',
                         style: TextStyle(
                             fontSize: 15, fontWeight: FontWeight.w700)),
@@ -429,12 +416,11 @@ class _DeactivatedScreen extends StatelessWidget {
 }
 
 // ── Auth navigator ────────────────────────────────────────────────────────────
-enum _AuthView { login, signup, signupOtp }
+// ── KEY FIX: added loginOtp view so Login → OTP → Home works correctly ────────
+enum _AuthView { login, signup, signupOtp, loginOtp }
 
 class _AuthNavigator extends StatefulWidget {
-  /// Fired when Google sign-in/up succeeds — goes straight to app (guest role)
   final VoidCallback onGuestAuth;
-  /// Fired when OTP is verified — AuthGate's auth stream handles the rest
   final VoidCallback onOtpVerified;
 
   const _AuthNavigator({
@@ -448,7 +434,7 @@ class _AuthNavigator extends StatefulWidget {
 }
 
 class _AuthNavigatorState extends State<_AuthNavigator> {
-  _AuthView _view      = _AuthView.login;
+  _AuthView _view        = _AuthView.login;
   String?   _otpEmail;
   String?   _otpFullName;
 
@@ -466,39 +452,56 @@ class _AuthNavigatorState extends State<_AuthNavigator> {
     });
   }
 
+  // ── NEW: navigate to OTP after login credentials verified ─────────────────
+  void _goToLoginOtp({ required String email }) {
+    setState(() {
+      _otpEmail    = email;
+      _otpFullName = '';   // not needed for login OTP
+      _view        = _AuthView.loginOtp;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 250),
       child: switch (_view) {
 
-        // ── Login ─────────────────────────────────────────────────────
-        // Email/password login no longer requires OTP — only signup does.
-        // onLogin fires immediately after AuthService.signIn() succeeds;
-        // AuthGate's onAuthStateChange (signedIn) then resolves the role.
+        // ── Login ──────────────────────────────────────────────────────
         _AuthView.login => LoginScreen(
           key:          const ValueKey('login'),
-          onLogin:      widget.onOtpVerified,   // triggers AuthGate role check
-          onGuestLogin: widget.onGuestAuth,      // Google → straight to app
+          // After credentials verified → show OTP screen for login
+          onLogin: (String email) => _goToLoginOtp(email: email),
+          onGuestLogin: widget.onGuestAuth,
           onGoSignup:   _goToSignup,
         ),
 
-        // ── Signup ────────────────────────────────────────────────────
+        // ── Signup ─────────────────────────────────────────────────────
         _AuthView.signup => SignupScreen(
           key:          const ValueKey('signup'),
           onGoLogin:    _goToLogin,
           onNeedsOtp:   ({required String email, required String fullName}) =>
               _goToSignupOtp(email: email, fullName: fullName),
-          onGuestSignup: widget.onGuestAuth,     // Google → straight to app
+          onGuestSignup: widget.onGuestAuth,
         ),
 
-        // ── Signup OTP ────────────────────────────────────────────────
+        // ── Signup OTP ─────────────────────────────────────────────────
         _AuthView.signupOtp => OtpScreen(
           key:        const ValueKey('signupOtp'),
           email:      _otpEmail!,
           fullName:   _otpFullName!,
-          onVerified: widget.onOtpVerified,      // → AuthGate resolves role
+          onVerified: widget.onOtpVerified,
           onBack:     _goToSignup,
+        ),
+
+        // ── Login OTP — NEW ────────────────────────────────────────────
+        // Same OtpScreen widget, different type so profile insert is skipped
+        _AuthView.loginOtp => OtpScreen(
+          key:        const ValueKey('loginOtp'),
+          email:      _otpEmail!,
+          fullName:   '',     // login OTP doesn't need fullName
+          onVerified: widget.onOtpVerified,
+          onBack:     _goToLogin,
         ),
       },
     );
