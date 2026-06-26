@@ -15,7 +15,6 @@ class AuthService {
     try {
       await _supabase.auth.signInWithPassword(
         email: email, password: password);
-      // Immediately destroy session — OTP must complete login
       await _supabase.auth.signOut(scope: SignOutScope.local);
       return null;
     } on AuthException catch (e) {
@@ -37,12 +36,9 @@ class AuthService {
   static Future<String?> signIn(String email, String password) async {
     final cleanEmail = AppValidators.normalizeEmail(email);
 
-    // Step 1: validate credentials
     final credError = await validateCredentials(cleanEmail, password);
     if (credError != null) return credError;
 
-    // Step 2: check is_active BEFORE sending OTP
-    //         We need a temporary session to query the profile
     try {
       final authRes = await _supabase.auth.signInWithPassword(
         email: cleanEmail, password: password);
@@ -59,19 +55,15 @@ class AuthService {
           .eq('id', userId)
           .maybeSingle();
 
-      // Always destroy the temp session immediately
       await _supabase.auth.signOut(scope: SignOutScope.local);
 
       if (profile != null && profile['is_active'] == false) {
         return 'Your account has been deactivated. Please contact an administrator for assistance.';
       }
     } catch (_) {
-      // If profile check fails, still destroy any temp session
       try { await _supabase.auth.signOut(scope: SignOutScope.local); } catch (_) {}
-      // Fail open — let OTP proceed; AuthGate will catch it on resolve
     }
 
-    // Step 3: send OTP
     try {
       await _supabase.auth.signInWithOtp(
         email:            cleanEmail,
@@ -120,21 +112,32 @@ class AuthService {
     }
   }
 
-  // ── Complete profile after OTP verified (signup) ───────────────────
+  // ── Complete profile after OTP verified ────────────────────────────
+  // Now accepts all masterlist fields so the profile is fully populated
+  // without any role-selection step.
   static Future<void> signUpCompleteProfile({
     required String email,
     required String fullName,
     String? studentId,
+    String? role,
+    String? department,
+    String? course,
+    int?    yearLevel,
   }) async {
     try {
       final user = _supabase.auth.currentUser;
       if (user == null) return;
       await _supabase.from('profiles').upsert({
-        'id':        user.id,
-        'full_name': AppValidators.sanitizeName(fullName),
-        'email':     AppValidators.normalizeEmail(email),
-        'is_active': true,
-        'role':      null,
+        'id':         user.id,
+        'full_name':  AppValidators.sanitizeName(fullName),
+        'email':      AppValidators.normalizeEmail(email),
+        'is_active':  true,
+        'role':       role,
+        'student_id': studentId,
+        'department': department,
+        'course':     course,
+        'year_level': yearLevel,
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
       }, onConflict: 'id', ignoreDuplicates: false);
     } catch (_) {}
   }
@@ -174,7 +177,6 @@ class AuthService {
         idToken:  idToken,
       );
 
-      // Check is_active after Google sign-in
       final user = _supabase.auth.currentUser;
       if (user != null) {
         final profile = await _supabase
