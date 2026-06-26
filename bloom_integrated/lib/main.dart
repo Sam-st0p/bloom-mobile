@@ -214,12 +214,8 @@ class _AuthGateState extends State<AuthGate> {
         }
 
         if (event == AuthChangeEvent.signedOut) {
-          // ── KEY FIX ────────────────────────────────────────────────
-          // Do NOT react to signedOut while _AuthNavigator is showing
-          // the OTP screen. AuthService.signIn() signs out locally after
-          // credential check — that signedOut event must be ignored here.
-          // We only reset to unauthenticated if AuthGate itself is
-          // already showing the main app (authenticated/needsRole).
+          // Only reset to unauthenticated if already in the app.
+          // Ignore signedOut events that fire during auth flows.
           if (_status == _AuthStatus.authenticated ||
               _status == _AuthStatus.needsRole) {
             _stopDeactivationWatcher();
@@ -234,6 +230,14 @@ class _AuthGateState extends State<AuthGate> {
     );
   }
 
+  // ── Resolve what screen to show after a successful sign-in ────────────────
+  //
+  // Email-domain check happens FIRST, before any DB query:
+  //   Non-@cvsu.edu.ph (Google/OAuth) → auto-upsert guest → MainShell
+  //   @cvsu.edu.ph + no role set       → RoleSelectionScreen
+  //   @cvsu.edu.ph + role set          → MainShell
+  //   Deactivated                      → DeactivatedScreen + sign out
+  //
   Future<void> _resolveAuthenticatedStatus() async {
     final myCheckId = ++_checkId;
     final user = _supabase.auth.currentUser;
@@ -243,6 +247,28 @@ class _AuthGateState extends State<AuthGate> {
       return;
     }
 
+    // ── Non-CvSU users (Google / any OAuth) are always guest ─────────────
+    // Check domain first — before any DB query — so Google users NEVER
+    // hit RoleSelectionScreen, even if the upsert in login_screen.dart
+    // races with this auth event.
+    final email = (user.email ?? '').toLowerCase().trim();
+    if (!email.endsWith('@cvsu.edu.ph')) {
+      try {
+        await _supabase.from('profiles').upsert({
+          'id':         user.id,
+          'role':       'guest',
+          'updated_at': DateTime.now().toUtc().toIso8601String(),
+        }, onConflict: 'id');
+      } catch (_) {
+        // Non-fatal — they still get into the app as guest.
+      }
+      if (!mounted || myCheckId != _checkId) return;
+      _startDeactivationWatcher(user.id);
+      setState(() => _status = _AuthStatus.authenticated);
+      return;
+    }
+
+    // ── CvSU users: check profile for role + active status ───────────────
     try {
       final profile = await _supabase
           .from('profiles')
@@ -265,6 +291,7 @@ class _AuthGateState extends State<AuthGate> {
       final role = (profile?['role'] as String? ?? '').trim();
 
       if (role.isEmpty) {
+        // CvSU user who hasn't picked a role yet → RoleSelectionScreen.
         if (mounted) setState(() => _status = _AuthStatus.needsRole);
       } else {
         if (mounted) setState(() => _status = _AuthStatus.authenticated);
@@ -372,10 +399,8 @@ class _DeactivatedScreen extends StatelessWidget {
                     color: const Color(0xFFFEE2E2),
                     borderRadius: BorderRadius.circular(20),
                   ),
-                  child: const Icon(
-                    Icons.shield_outlined,
-                    size: 40, color: Color(0xFFDC2626),
-                  ),
+                  child: const Icon(Icons.shield_outlined,
+                      size: 40, color: Color(0xFFDC2626)),
                 ),
                 const SizedBox(height: 24),
                 const Text('Account Deactivated',
@@ -416,7 +441,6 @@ class _DeactivatedScreen extends StatelessWidget {
 }
 
 // ── Auth navigator ────────────────────────────────────────────────────────────
-// ── KEY FIX: added loginOtp view so Login → OTP → Home works correctly ────────
 enum _AuthView { login, signup, signupOtp, loginOtp }
 
 class _AuthNavigator extends StatefulWidget {
@@ -452,11 +476,10 @@ class _AuthNavigatorState extends State<_AuthNavigator> {
     });
   }
 
-  // ── NEW: navigate to OTP after login credentials verified ─────────────────
   void _goToLoginOtp({ required String email }) {
     setState(() {
       _otpEmail    = email;
-      _otpFullName = '';   // not needed for login OTP
+      _otpFullName = '';
       _view        = _AuthView.loginOtp;
     });
   }
@@ -467,25 +490,21 @@ class _AuthNavigatorState extends State<_AuthNavigator> {
       duration: const Duration(milliseconds: 250),
       child: switch (_view) {
 
-        // ── Login ──────────────────────────────────────────────────────
         _AuthView.login => LoginScreen(
           key:          const ValueKey('login'),
-          // After credentials verified → show OTP screen for login
-          onLogin: (String email) => _goToLoginOtp(email: email),
+          onLogin:      (String email) => _goToLoginOtp(email: email),
           onGuestLogin: widget.onGuestAuth,
           onGoSignup:   _goToSignup,
         ),
 
-        // ── Signup ─────────────────────────────────────────────────────
         _AuthView.signup => SignupScreen(
-          key:          const ValueKey('signup'),
-          onGoLogin:    _goToLogin,
-          onNeedsOtp:   ({required String email, required String fullName}) =>
+          key:           const ValueKey('signup'),
+          onGoLogin:     _goToLogin,
+          onNeedsOtp:    ({required String email, required String fullName}) =>
               _goToSignupOtp(email: email, fullName: fullName),
           onGuestSignup: widget.onGuestAuth,
         ),
 
-        // ── Signup OTP ─────────────────────────────────────────────────
         _AuthView.signupOtp => OtpScreen(
           key:        const ValueKey('signupOtp'),
           email:      _otpEmail!,
@@ -494,12 +513,10 @@ class _AuthNavigatorState extends State<_AuthNavigator> {
           onBack:     _goToSignup,
         ),
 
-        // ── Login OTP — NEW ────────────────────────────────────────────
-        // Same OtpScreen widget, different type so profile insert is skipped
         _AuthView.loginOtp => OtpScreen(
           key:        const ValueKey('loginOtp'),
           email:      _otpEmail!,
-          fullName:   '',     // login OTP doesn't need fullName
+          fullName:   '',
           onVerified: widget.onOtpVerified,
           onBack:     _goToLogin,
         ),
