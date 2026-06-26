@@ -350,6 +350,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ]);
 
       final profile   = results[0] as Map<String, dynamic>?;
+      // Self-heal: if full_name is null, copy from auth metadata
+        if (profile != null && 
+            (profile['full_name'] == null || 
+            (profile['full_name'] as String).trim().isEmpty)) {
+          final meta = _supabase.auth.currentUser?.userMetadata;
+          final metaName = meta?['full_name'] as String?;
+          if (metaName != null && metaName.isNotEmpty && userId != null) {
+            await _supabase.from('profiles')
+                .update({'full_name': metaName})
+                .eq('id', userId);
+            profile['full_name'] = metaName;
+          }
+        }
+
       final rawBadges = List<Map<String, dynamic>>.from(results[1] as List);
       final certs     = List<Map<String, dynamic>>.from(results[2] as List);
       final progress  = results[3] as List;

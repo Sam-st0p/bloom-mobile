@@ -87,6 +87,192 @@ class _LoginScreenState extends State<LoginScreen> {
     widget.onLogin(AppValidators.normalizeEmail(_emailCtrl.text));
   }
 
+  // ── Forgot password ───────────────────────────────────────────────────────
+
+  void _showForgotPassword() {
+    // Pre-fill with whatever the user already typed in the email field.
+    final resetCtrl = TextEditingController(
+        text: _isCvsuEmail ? _emailCtrl.text.trim() : '');
+    final resetFormKey = GlobalKey<FormState>();
+    bool sending = false;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) => Padding(
+          padding: EdgeInsets.only(
+              bottom: MediaQuery.of(ctx).viewInsets.bottom),
+          child: Container(
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+            ),
+            padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
+            child: Form(
+              key: resetFormKey,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Drag handle
+                  Center(
+                    child: Container(
+                      width: 40, height: 4,
+                      decoration: BoxDecoration(
+                          color: AppColors.border,
+                          borderRadius: BorderRadius.circular(2))),
+                  ),
+                  const SizedBox(height: 20),
+
+                  Row(children: [
+                    Container(
+                      width: 40, height: 40,
+                      decoration: BoxDecoration(
+                        color: AppColors.primary.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(Icons.lock_reset_rounded,
+                          color: AppColors.primary, size: 20),
+                    ),
+                    const SizedBox(width: 12),
+                    Column(crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                      Text('Reset password',
+                          style: GoogleFonts.nunito(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w900,
+                              color: AppColors.textDark)),
+                      Text('Enter your @cvsu.edu.ph email',
+                          style: GoogleFonts.nunito(
+                              fontSize: 12, color: AppColors.textLight)),
+                    ]),
+                  ]),
+                  const SizedBox(height: 20),
+
+                  TextFormField(
+                    controller:   resetCtrl,
+                    keyboardType: TextInputType.emailAddress,
+                    autocorrect:  false,
+                    style: GoogleFonts.nunito(
+                        fontSize: 14, color: AppColors.textDark),
+                    validator: (v) {
+                      if (v == null || v.trim().isEmpty) {
+                        return 'Email is required.';
+                      }
+                      if (!v.trim().toLowerCase().endsWith('@cvsu.edu.ph')) {
+                        return 'Only @cvsu.edu.ph emails are accepted.';
+                      }
+                      return null;
+                    },
+                    decoration: InputDecoration(
+                      hintText:  'you@cvsu.edu.ph',
+                      hintStyle: GoogleFonts.nunito(
+                          color: AppColors.textLight, fontSize: 13),
+                      prefixIcon: const Icon(Icons.mail_outline,
+                          color: AppColors.textLight, size: 20),
+                      filled:    true,
+                      fillColor: AppColors.background,
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(color: AppColors.border)),
+                      enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(color: AppColors.border)),
+                      focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(
+                              color: AppColors.primary, width: 2)),
+                      errorBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(color: AppColors.danger)),
+                      focusedErrorBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(
+                              color: AppColors.danger, width: 2)),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+
+                  SizedBox(
+                    width: double.infinity,
+                    height: 50,
+                    child: ElevatedButton(
+                      onPressed: sending ? null : () async {
+                        if (!(resetFormKey.currentState?.validate() ?? false)) {
+                          return;
+                        }
+                        setSheetState(() => sending = true);
+                        try {
+                          await Supabase.instance.client.auth
+                              .resetPasswordForEmail(
+                            resetCtrl.text.trim().toLowerCase(),
+                            redirectTo: 'io.supabase.bloom://reset-callback',
+                          );
+                          if (ctx.mounted) {
+                            Navigator.pop(ctx);
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  'Reset link sent to ${resetCtrl.text.trim()}. '
+                                  'Check your inbox.',
+                                  style: GoogleFonts.nunito(color: Colors.white),
+                                ),
+                                backgroundColor: AppColors.primary,
+                                behavior: SnackBarBehavior.floating,
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(10)),
+                              ),
+                            );
+                          }
+                        } catch (e) {
+                          if (ctx.mounted) {
+                            setSheetState(() => sending = false);
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  'Failed to send reset email. Please try again.',
+                                  style: GoogleFonts.nunito(color: Colors.white),
+                                ),
+                                backgroundColor: AppColors.danger,
+                                behavior: SnackBarBehavior.floating,
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(10)),
+                              ),
+                            );
+                          }
+                        }
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primary,
+                        disabledBackgroundColor:
+                            AppColors.primary.withValues(alpha: 0.4),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14)),
+                        elevation: 0,
+                      ),
+                      child: sending
+                          ? const SizedBox(
+                              width: 20, height: 20,
+                              child: CircularProgressIndicator(
+                                  color: Colors.white, strokeWidth: 2.5))
+                          : Text('Send reset link',
+                              style: GoogleFonts.nunito(
+                                  fontSize:   15,
+                                  fontWeight: FontWeight.w800,
+                                  color:      Colors.white)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    ).whenComplete(() => resetCtrl.dispose());
+  }
+
   // ── Google sign-in → guest role ───────────────────────────────────────────
 
   Future<void> _handleGoogleLogin() async {
@@ -346,7 +532,19 @@ class _LoginScreenState extends State<LoginScreen> {
                           setState(() => _obscurePass = !_obscurePass)),
                     onFieldSubmitted: (_) => _handleLogin(),
                   ),
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 6),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: GestureDetector(
+                      onTap: _showForgotPassword,
+                      child: Text('Forgot password?',
+                          style: GoogleFonts.nunito(
+                              fontSize:   13,
+                              fontWeight: FontWeight.w700,
+                              color:      AppColors.primary)),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
 
                   // ── Sign in button ────────────────────────────────────
                   SizedBox(
