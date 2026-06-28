@@ -51,7 +51,8 @@ class _SignupScreenState extends State<SignupScreen> {
   // ── Helpers ──────────────────────────────────────────────────────────────
 
   bool get _isCvsuEmail =>
-      _emailCtrl.text.trim().toLowerCase().endsWith('@cvsu.edu.ph');
+      RegExp(r'^[^@]+@cvsu\.edu\.ph$')
+          .hasMatch(_emailCtrl.text.trim().toLowerCase());
 
   // ── Email/password signup ─────────────────────────────────────────────────
 
@@ -61,7 +62,7 @@ class _SignupScreenState extends State<SignupScreen> {
 
     if (!_formKey.currentState!.validate()) return;
 
-    // Extra guard — validator covers this but be explicit
+    // Guard 1: domain check (validator already covers this, but be explicit)
     if (!_isCvsuEmail) {
       setState(() => _error =
           'Only @cvsu.edu.ph institutional emails can create an account here.\n'
@@ -71,8 +72,21 @@ class _SignupScreenState extends State<SignupScreen> {
 
     setState(() => _loading = true);
 
-    final fullName   = '${_firstNameCtrl.text.trim()} ${_lastNameCtrl.text.trim()}';
     final cleanEmail = AppValidators.normalizeEmail(_emailCtrl.text);
+
+    // ── Guard 2: masterlist check ─────────────────────────────────────────
+    // Must happen BEFORE signUp() so no account or OTP is ever created
+    // for an email that isn't in the CvSU enrollment records.
+    final masterlistError = await AuthService.checkMasterlist(cleanEmail);
+    if (!mounted) return;
+
+    if (masterlistError != null) {
+      setState(() { _error = masterlistError; _loading = false; });
+      return; // stops here — signUp() is never called
+    }
+
+    // ── Proceed: email is verified as authorised ──────────────────────────
+    final fullName = '${_firstNameCtrl.text.trim()} ${_lastNameCtrl.text.trim()}';
 
     final error = await AuthService.signUp(
       email:     cleanEmail,
@@ -325,12 +339,11 @@ class _SignupScreenState extends State<SignupScreen> {
                     icon:      Icons.mail_outline,
                     inputType: TextInputType.emailAddress,
                     onChanged: (_) => setState(() {}), // rebuild suffix tick
-                    // Validate it's a CvSU email specifically
                     validator: (v) {
                       final base = AppValidators.email(v);
                       if (base != null) return base;
-                      if (!(v ?? '').trim().toLowerCase()
-                          .endsWith('@cvsu.edu.ph')) {
+                      if (!RegExp(r'^[^@]+@cvsu\.edu\.ph$')
+                          .hasMatch((v ?? '').trim().toLowerCase())) {
                         return 'Only @cvsu.edu.ph emails are accepted here.';
                       }
                       return null;

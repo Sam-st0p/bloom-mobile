@@ -42,7 +42,6 @@ class AuthService {
     if (credError != null) return credError;
 
     // Step 2: check is_active BEFORE sending OTP
-    //         We need a temporary session to query the profile
     try {
       final authRes = await _supabase.auth.signInWithPassword(
         email: cleanEmail, password: password);
@@ -59,16 +58,13 @@ class AuthService {
           .eq('id', userId)
           .maybeSingle();
 
-      // Always destroy the temp session immediately
       await _supabase.auth.signOut(scope: SignOutScope.local);
 
       if (profile != null && profile['is_active'] == false) {
         return 'Your account has been deactivated. Please contact an administrator for assistance.';
       }
     } catch (_) {
-      // If profile check fails, still destroy any temp session
       try { await _supabase.auth.signOut(scope: SignOutScope.local); } catch (_) {}
-      // Fail open — let OTP proceed; AuthGate will catch it on resolve
     }
 
     // Step 3: send OTP
@@ -87,6 +83,91 @@ class AuthService {
       return 'Failed to send verification code. Please try again.';
     } catch (_) {
       return 'Failed to send verification code. Please try again.';
+    }
+  }
+
+  // ── Check masterlist — returns null if authorised, error string if not ──
+  static Future<String?> checkMasterlist(String email) async {
+    try {
+      final result = await _supabase
+          .rpc('is_email_in_masterlist', params: {'lookup_email': email});
+
+      if (result == true) return null;
+
+      return 'Your email is not in the CvSU enrollment records. '
+          'Only currently enrolled students and faculty members can register.';
+    } catch (_) {
+      return 'Unable to verify enrollment records. Please check your connection and try again.';
+    }
+  }
+
+  // ── Fetch a single masterlist row for the given email ──────────────
+  // Returns the row map (role, full_name, student_id, department,
+  // course, year_level) or null if not found / error.
+  static Future<Map<String, dynamic>?> getMasterlistEntry(String email) async {
+    try {
+      final row = await _supabase
+          .from('masterlist')
+          .select('role, full_name, student_id, department, course, year_level')
+          .eq('cvsu_email', email.toLowerCase().trim())
+          .eq('is_active', true)
+          .maybeSingle();
+      return row;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // ── Apply masterlist data to profiles after OTP verification ───────
+  // Called from OtpScreen._verify() immediately after verifyOTP()
+  // succeeds. Writes role + academic info so the user goes straight
+  // to Home without ever seeing a role-selection screen.
+  static Future<String?> applyMasterlistProfile({
+    required String email,
+    required String fullName,
+  }) async {
+    try {
+      final user = _supabase.auth.currentUser;
+      if (user == null) return 'Session not found. Please sign in again.';
+
+      final entry = await getMasterlistEntry(email);
+
+      if (entry == null) {
+        // Masterlist row missing — write a minimal profile and let
+        // AuthGate send the user to RoleSelectionScreen as a fallback.
+        await _supabase.from('profiles').upsert({
+          'id':        user.id,
+          'full_name': AppValidators.sanitizeName(fullName),
+          'email':     email,
+          'is_active': true,
+          'role':      null,
+        }, onConflict: 'id', ignoreDuplicates: false);
+        return null;
+      }
+
+      // Build profile data from the masterlist row
+      final Map<String, dynamic> profileData = {
+        'id':        user.id,
+        'full_name': AppValidators.sanitizeName(fullName),
+        'email':     email,
+        'is_active': true,
+        'role':      entry['role'],           // auto-assigned — no manual selection
+      };
+
+      if (entry['student_id'] != null) profileData['student_id'] = entry['student_id'];
+      if (entry['department'] != null) profileData['department']  = entry['department'];
+      if (entry['course']     != null) profileData['course']      = entry['course'];
+      if (entry['year_level'] != null) profileData['year_level']  = entry['year_level'];
+
+      await _supabase.from('profiles').upsert(
+        profileData,
+        onConflict:       'id',
+        ignoreDuplicates: false,
+      );
+
+      return null; // success
+    } catch (e) {
+      return 'Failed to set up your profile. Please contact support.';
     }
   }
 
@@ -120,7 +201,8 @@ class AuthService {
     }
   }
 
-  // ── Complete profile after OTP verified (signup) ───────────────────
+  // ── Complete profile after OTP verified (legacy fallback) ──────────
+  // Kept for any callers that haven't migrated to applyMasterlistProfile.
   static Future<void> signUpCompleteProfile({
     required String email,
     required String fullName,
@@ -174,7 +256,6 @@ class AuthService {
         idToken:  idToken,
       );
 
-      // Check is_active after Google sign-in
       final user = _supabase.auth.currentUser;
       if (user != null) {
         final profile = await _supabase

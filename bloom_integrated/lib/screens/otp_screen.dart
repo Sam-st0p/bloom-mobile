@@ -3,6 +3,14 @@
 //
 // NOTE: OTP is used for SIGNUP ONLY. Login no longer requires OTP
 // (removed to stay within Resend's free email quota at scale).
+//
+// Signup path (fullName.isNotEmpty):
+//   verifyOTP() → applyMasterlistProfile() → onVerified()
+//   Role badge is pre-fetched and shown while the user reads their email.
+//
+// Login path (fullName == ''):
+//   verifyOTP() → onVerified()
+//   No masterlist query, no role badge, existing profile untouched.
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -39,34 +47,34 @@ class _OtpScreenState extends State<OtpScreen> with WidgetsBindingObserver {
   int     _resendCooldown = 0;
   bool    _canResend      = false;
 
+  // Role badge pre-fetched from masterlist — signup only
+  String? _assignedRole;
+
+  // True when this screen is reached from signup, false from login
+  bool get _isSignup => widget.fullName.isNotEmpty;
+
   @override
   void initState() {
     super.initState();
-
-    // Re-request the keyboard when the app resumes (e.g. user checked Gmail)
     WidgetsBinding.instance.addObserver(this);
-
     _startResendCooldown(60);
     _otpController.addListener(_onOtpChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _requestKeyboard();
     });
+    // Pre-fetch role badge only during signup — login skips this entirely
+    if (_isSignup) _prefetchRole();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed && mounted && !_loading) {
-      // Small delay lets the platform finish restoring the activity/scene
-      // before we interact with the IME.
       Future.delayed(const Duration(milliseconds: 300), () {
         if (mounted) _requestKeyboard();
       });
     }
   }
 
-  // Unfocus/refocus cycle — guarantees the keyboard reappears after resume,
-  // since requestFocus() alone can silently no-op on Android once the IME
-  // connection has been detached.
   void _requestKeyboard() {
     _focusNode.unfocus();
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -87,6 +95,17 @@ class _OtpScreenState extends State<OtpScreen> with WidgetsBindingObserver {
     super.dispose();
   }
 
+  // ── Pre-fetch role badge (signup only) ───────────────────────────
+  // Cosmetic — actual profile write happens in _verify().
+  Future<void> _prefetchRole() async {
+    final entry = await AuthService.getMasterlistEntry(widget.email);
+    if (!mounted) return;
+    if (entry != null && entry['role'] != null) {
+      final raw = entry['role'].toString();
+      setState(() => _assignedRole = raw[0].toUpperCase() + raw.substring(1));
+    }
+  }
+
   void _startResendCooldown(int seconds) {
     setState(() { _resendCooldown = seconds; _canResend = false; });
     Future.doWhile(() async {
@@ -103,6 +122,7 @@ class _OtpScreenState extends State<OtpScreen> with WidgetsBindingObserver {
 
   String get _otp => _otpController.text;
 
+  // ── Verify OTP ────────────────────────────────────────────────────
   Future<void> _verify() async {
     if (_loading) return;
 
@@ -113,7 +133,7 @@ class _OtpScreenState extends State<OtpScreen> with WidgetsBindingObserver {
 
     setState(() { _loading = true; _error = null; });
 
-    // ── Step 1: Verify the signup OTP ─────────────────────────────────
+    // ── Step 1: verify the OTP with Supabase ──────────────────────────
     try {
       await Supabase.instance.client.auth.verifyOTP(
         email: widget.email,
@@ -147,22 +167,29 @@ class _OtpScreenState extends State<OtpScreen> with WidgetsBindingObserver {
       return;
     }
 
-    // ── Step 2: write profile row (non-fatal) ─────────────────────────
-    // Even if this fails, AuthGate sees role=null and routes to
-    // RoleSelectionScreen, where the profile gets fixed.
-    try {
-      await AuthService.signUpCompleteProfile(
-        email:     widget.email,
-        fullName:  widget.fullName,
-        studentId: '',
-      ).timeout(const Duration(seconds: 10));
-    } catch (e) {
-      debugPrint('signUpCompleteProfile non-fatal: $e');
+    // ── Step 2: apply masterlist → profiles (signup only) ─────────────
+    // Login skips this block entirely — the existing profile is already
+    // correct and must not be overwritten.
+    if (_isSignup) {
+      try {
+        final profileError = await AuthService.applyMasterlistProfile(
+          email:    widget.email,
+          fullName: widget.fullName,
+        ).timeout(const Duration(seconds: 10));
+
+        if (!mounted) return;
+
+        if (profileError != null) {
+          setState(() { _error = profileError; _loading = false; });
+          return;
+        }
+      } catch (e) {
+        // Non-fatal — AuthGate routes on role; null role → RoleSelectionScreen.
+        debugPrint('applyMasterlistProfile non-fatal: $e');
+      }
     }
 
-    // ── Step 3: done ───────────────────────────────────────────────────
-    // AuthGate's onAuthStateChange already fired when verifyOTP completed.
-    // It will fetch role=null and route to RoleSelectionScreen automatically.
+    // ── Step 3: done — AuthGate fires from the auth state change ───────
     if (!mounted) return;
     setState(() => _loading = false);
     widget.onVerified();
@@ -290,7 +317,36 @@ class _OtpScreenState extends State<OtpScreen> with WidgetsBindingObserver {
                             fontWeight: FontWeight.w800)),
                     ]),
                 ),
-                const SizedBox(height: 32),
+                const SizedBox(height: 20),
+
+                // ── Role badge (signup only) ─────────────────────────
+                if (_isSignup && _assignedRole != null) ...[
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: Colors.green.shade50,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.green.shade200),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.verified_user_outlined,
+                            color: Colors.green.shade700, size: 18),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Role assigned: $_assignedRole',
+                          style: GoogleFonts.nunito(
+                              color:      Colors.green.shade700,
+                              fontSize:   13,
+                              fontWeight: FontWeight.w700),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                ],
 
                 if (_error != null) ...[
                   Container(
@@ -322,7 +378,7 @@ class _OtpScreenState extends State<OtpScreen> with WidgetsBindingObserver {
                   return Stack(
                     alignment: Alignment.center,
                     children: [
-                      // Hidden real input — drives the visual boxes below
+                      // Hidden real input
                       SizedBox(
                         width: 1, height: 1,
                         child: TextField(
@@ -337,7 +393,7 @@ class _OtpScreenState extends State<OtpScreen> with WidgetsBindingObserver {
                               border: InputBorder.none, counterText: ''),
                         ),
                       ),
-                      // Visual boxes — tap to bring the keyboard back
+                      // Visual boxes
                       GestureDetector(
                         onTap: _requestKeyboard,
                         child: Row(
@@ -446,8 +502,8 @@ class _OtpScreenState extends State<OtpScreen> with WidgetsBindingObserver {
                           color: AppColors.primary, size: 18),
                       const SizedBox(width: 10),
                       Expanded(child: Text(
-                        'Check your inbox and spam folder. Once verified '
-                        'you\'ll be taken to select your role.',
+                        'Check your inbox and spam folder. '
+                        'Once verified you\'ll be taken directly to the Home screen.',
                         style: GoogleFonts.nunito(
                             fontSize: 12,
                             color:    AppColors.textMid,
