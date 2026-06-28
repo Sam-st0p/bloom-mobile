@@ -1,12 +1,10 @@
 // lib/screens/otp_screen.dart
 // BLOOM GAD Mobile App — OTP Verification Screen
 //
-// NOTE: OTP is used for SIGNUP ONLY. Login no longer requires OTP
-// (removed to stay within Resend's free email quota at scale).
-//
 // Signup path (fullName.isNotEmpty):
-//   verifyOTP() → applyMasterlistProfile() → onVerified()
-//   Role badge is pre-fetched and shown while the user reads their email.
+//   verifyOTP() → writeProfileFromMasterlist() → onVerified()
+//   Masterlist data is passed in directly from SignupScreen so no
+//   second DB query is needed. Role badge shown while user reads email.
 //
 // Login path (fullName == ''):
 //   verifyOTP() → onVerified()
@@ -18,10 +16,19 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../theme/app_theme.dart';
 import '../services/auth_service.dart';
+import '../utils/validators.dart';
 
 class OtpScreen extends StatefulWidget {
-  final String       email;
-  final String       fullName;
+  final String  email;
+  final String  fullName;
+
+  // Masterlist data passed from SignupScreen — null/empty for login
+  final String  role;
+  final String? studentId;
+  final String? department;
+  final String? course;
+  final int?    yearLevel;
+
   final VoidCallback onVerified;
   final VoidCallback onBack;
 
@@ -29,6 +36,11 @@ class OtpScreen extends StatefulWidget {
     super.key,
     required this.email,
     required this.fullName,
+    this.role       = '',
+    this.studentId,
+    this.department,
+    this.course,
+    this.yearLevel,
     required this.onVerified,
     required this.onBack,
   });
@@ -47,11 +59,14 @@ class _OtpScreenState extends State<OtpScreen> with WidgetsBindingObserver {
   int     _resendCooldown = 0;
   bool    _canResend      = false;
 
-  // Role badge pre-fetched from masterlist — signup only
-  String? _assignedRole;
-
-  // True when this screen is reached from signup, false from login
+  // True when arriving from signup, false from login
   bool get _isSignup => widget.fullName.isNotEmpty;
+
+  // Capitalised role label for the badge e.g. "Student", "Faculty"
+  String? get _assignedRoleLabel {
+    if (widget.role.isEmpty) return null;
+    return widget.role[0].toUpperCase() + widget.role.substring(1);
+  }
 
   @override
   void initState() {
@@ -62,8 +77,6 @@ class _OtpScreenState extends State<OtpScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _requestKeyboard();
     });
-    // Pre-fetch role badge only during signup — login skips this entirely
-    if (_isSignup) _prefetchRole();
   }
 
   @override
@@ -93,17 +106,6 @@ class _OtpScreenState extends State<OtpScreen> with WidgetsBindingObserver {
     _otpController.dispose();
     _focusNode.dispose();
     super.dispose();
-  }
-
-  // ── Pre-fetch role badge (signup only) ───────────────────────────
-  // Cosmetic — actual profile write happens in _verify().
-  Future<void> _prefetchRole() async {
-    final entry = await AuthService.getMasterlistEntry(widget.email);
-    if (!mounted) return;
-    if (entry != null && entry['role'] != null) {
-      final raw = entry['role'].toString();
-      setState(() => _assignedRole = raw[0].toUpperCase() + raw.substring(1));
-    }
   }
 
   void _startResendCooldown(int seconds) {
@@ -167,29 +169,37 @@ class _OtpScreenState extends State<OtpScreen> with WidgetsBindingObserver {
       return;
     }
 
-    // ── Step 2: apply masterlist → profiles (signup only) ─────────────
-    // Login skips this block entirely — the existing profile is already
-    // correct and must not be overwritten.
+    // ── Step 2: write profile (signup only) ───────────────────────────
+    // Uses the masterlist data passed in from SignupScreen — no extra
+    // DB query needed. Login skips this entirely.
     if (_isSignup) {
       try {
-        final profileError = await AuthService.applyMasterlistProfile(
-          email:    widget.email,
-          fullName: widget.fullName,
-        ).timeout(const Duration(seconds: 10));
+        final user = Supabase.instance.client.auth.currentUser;
+        if (user != null) {
+          final Map<String, dynamic> profileData = {
+            'id':        user.id,
+            'full_name': AppValidators.sanitizeName(widget.fullName),
+            'email':     widget.email,
+            'is_active': true,
+            'role':      widget.role.isEmpty ? null : widget.role,
+          };
+          if (widget.studentId  != null) profileData['student_id']  = widget.studentId;
+          if (widget.department != null) profileData['department']   = widget.department;
+          if (widget.course     != null) profileData['course']       = widget.course;
+          if (widget.yearLevel  != null) profileData['year_level']   = widget.yearLevel;
 
-        if (!mounted) return;
-
-        if (profileError != null) {
-          setState(() { _error = profileError; _loading = false; });
-          return;
+          await Supabase.instance.client
+              .from('profiles')
+              .upsert(profileData, onConflict: 'id', ignoreDuplicates: false)
+              .timeout(const Duration(seconds: 10));
         }
       } catch (e) {
-        // Non-fatal — AuthGate routes on role; null role → RoleSelectionScreen.
-        debugPrint('applyMasterlistProfile non-fatal: $e');
+        // Non-fatal — AuthGate will recover role from masterlist if needed.
+        debugPrint('profile write non-fatal: $e');
       }
     }
 
-    // ── Step 3: done — AuthGate fires from the auth state change ───────
+    // ── Step 3: done ───────────────────────────────────────────────────
     if (!mounted) return;
     setState(() => _loading = false);
     widget.onVerified();
@@ -319,8 +329,8 @@ class _OtpScreenState extends State<OtpScreen> with WidgetsBindingObserver {
                 ),
                 const SizedBox(height: 20),
 
-                // ── Role badge (signup only) ─────────────────────────
-                if (_isSignup && _assignedRole != null) ...[
+                // ── Role badge (signup only, when role is known) ─────
+                if (_isSignup && _assignedRoleLabel != null) ...[
                   Container(
                     padding: const EdgeInsets.symmetric(
                         horizontal: 16, vertical: 10),
@@ -336,7 +346,7 @@ class _OtpScreenState extends State<OtpScreen> with WidgetsBindingObserver {
                             color: Colors.green.shade700, size: 18),
                         const SizedBox(width: 8),
                         Text(
-                          'Role assigned: $_assignedRole',
+                          'Role assigned: $_assignedRoleLabel',
                           style: GoogleFonts.nunito(
                               color:      Colors.green.shade700,
                               fontSize:   13,

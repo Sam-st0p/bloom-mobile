@@ -10,7 +10,19 @@ import '../services/auth_service.dart';
 
 class SignupScreen extends StatefulWidget {
   final VoidCallback onGoLogin;
-  final void Function({required String email, required String fullName}) onNeedsOtp;
+
+  // Expanded signature — passes masterlist data straight to OtpScreen
+  // so it can write the profile without a second masterlist query.
+  final void Function({
+    required String  email,
+    required String  fullName,
+    required String  role,
+    required String? studentId,
+    required String? department,
+    required String? course,
+    required int?    yearLevel,
+  }) onNeedsOtp;
+
   /// Called after Google sign-up so the shell skips role selection (guest)
   final VoidCallback? onGuestSignup;
 
@@ -62,7 +74,7 @@ class _SignupScreenState extends State<SignupScreen> {
 
     if (!_formKey.currentState!.validate()) return;
 
-    // Guard 1: domain check (validator already covers this, but be explicit)
+    // Guard 1: domain check
     if (!_isCvsuEmail) {
       setState(() => _error =
           'Only @cvsu.edu.ph institutional emails can create an account here.\n'
@@ -74,18 +86,21 @@ class _SignupScreenState extends State<SignupScreen> {
 
     final cleanEmail = AppValidators.normalizeEmail(_emailCtrl.text);
 
-    // ── Guard 2: masterlist check ─────────────────────────────────────────
-    // Must happen BEFORE signUp() so no account or OTP is ever created
-    // for an email that isn't in the CvSU enrollment records.
+    // Guard 2: masterlist check — blocks unregistered emails before signUp()
     final masterlistError = await AuthService.checkMasterlist(cleanEmail);
     if (!mounted) return;
 
     if (masterlistError != null) {
       setState(() { _error = masterlistError; _loading = false; });
-      return; // stops here — signUp() is never called
+      return;
     }
 
-    // ── Proceed: email is verified as authorised ──────────────────────────
+    // Fetch the masterlist entry so we can pass it to OtpScreen directly.
+    // This avoids a second masterlist query after OTP verification.
+    final entry = await AuthService.getMasterlistEntry(cleanEmail);
+    if (!mounted) return;
+
+    // Guard 3: create the Supabase Auth user + send OTP email
     final fullName = '${_firstNameCtrl.text.trim()} ${_lastNameCtrl.text.trim()}';
 
     final error = await AuthService.signUp(
@@ -102,11 +117,19 @@ class _SignupScreenState extends State<SignupScreen> {
       return;
     }
 
-    // Success — tell parent to show OTP screen
-    widget.onNeedsOtp(email: cleanEmail, fullName: fullName);
+    // Success — pass masterlist data to OtpScreen so it can write the profile
+    widget.onNeedsOtp(
+      email:      cleanEmail,
+      fullName:   fullName,
+      role:       entry?['role']       as String?  ?? '',
+      studentId:  entry?['student_id'] as String?,
+      department: entry?['department'] as String?,
+      course:     entry?['course']     as String?,
+      yearLevel:  entry?['year_level'] as int?,
+    );
   }
 
-  // ── Google signup → auto-assign guest (mirrors login) ────────────────────
+  // ── Google signup → auto-assign guest ────────────────────────────────────
 
   Future<void> _handleGoogleSignup() async {
     if (_loading) return;
@@ -120,7 +143,6 @@ class _SignupScreenState extends State<SignupScreen> {
         return;
       }
 
-      // Auto-assign guest role — same as login does
       final userId = Supabase.instance.client.auth.currentUser?.id;
       if (userId != null) {
         await Supabase.instance.client.from('profiles').upsert({
@@ -242,7 +264,6 @@ class _SignupScreenState extends State<SignupScreen> {
                                   fontWeight: FontWeight.w700,
                                   color: AppColors.textDark)),
                           const SizedBox(width: 8),
-                          // Guest badge — matches the login screen
                           Container(
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 6, vertical: 2),
@@ -338,7 +359,7 @@ class _SignupScreenState extends State<SignupScreen> {
                     hint:      'you@cvsu.edu.ph',
                     icon:      Icons.mail_outline,
                     inputType: TextInputType.emailAddress,
-                    onChanged: (_) => setState(() {}), // rebuild suffix tick
+                    onChanged: (_) => setState(() {}),
                     validator: (v) {
                       final base = AppValidators.email(v);
                       if (base != null) return base;
@@ -419,8 +440,8 @@ class _SignupScreenState extends State<SignupScreen> {
                         Expanded(
                           child: Text(
                             'A 6-digit verification code will be sent to your '
-                            '@cvsu.edu.ph email. After verifying, you\'ll select '
-                            'your role (Student, Teacher, or Faculty).',
+                            '@cvsu.edu.ph email. After verifying, you\'ll be '
+                            'taken directly to the Home screen.',
                             style: GoogleFonts.nunito(
                                 fontSize: 12,
                                 color: AppColors.textMid,

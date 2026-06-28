@@ -1,5 +1,12 @@
 // lib/main.dart
 // BLOOM GAD Mobile App — Main entry point + AuthGate
+//
+// Role routing rules:
+//   • Non-@cvsu.edu.ph (Google) → always guest → MainShell
+//   • @cvsu.edu.ph → role already written at OTP verification from masterlist
+//                  → AuthGate checks role → MainShell
+//   • role empty (edge case: OTP write failed) → query masterlist again,
+//     write profile, proceed → MainShell. RoleSelectionScreen no longer shown.
 
 import 'dart:async';
 import 'package:app_links/app_links.dart';
@@ -12,7 +19,6 @@ import 'theme/app_theme.dart';
 import 'screens/login_screen.dart';
 import 'screens/signup_screen.dart';
 import 'screens/otp_screen.dart';
-import 'screens/role_selection_screen.dart';
 import 'screens/reset_password_screen.dart';
 import 'screens/main_shell.dart';
 
@@ -57,7 +63,6 @@ class BloomApp extends StatelessWidget {
 enum _AuthStatus {
   loading,
   unauthenticated,
-  needsRole,
   authenticated,
   passwordRecovery,
   deactivated,
@@ -77,7 +82,6 @@ bool _isRecoveryUrl() {
 // ── AuthGate ──────────────────────────────────────────────────────────────────
 class AuthGate extends StatefulWidget {
   const AuthGate({super.key});
-
   @override
   State<AuthGate> createState() => _AuthGateState();
 }
@@ -107,10 +111,9 @@ class _AuthGateState extends State<AuthGate> {
     super.dispose();
   }
 
-  // ── Realtime + polling deactivation watcher ───────────────────────────────
+  // ── Deactivation watcher ──────────────────────────────────────────────────
   void _startDeactivationWatcher(String userId) {
     _stopDeactivationWatcher();
-
     _profileChannel = _supabase
         .channel('profile-deactivation-$userId')
         .onPostgresChanges(
@@ -158,7 +161,7 @@ class _AuthGateState extends State<AuthGate> {
     if (mounted) setState(() => _status = _AuthStatus.deactivated);
   }
 
-  // ── Deep links (mobile only) ──────────────────────────────────────────────
+  // ── Deep links ────────────────────────────────────────────────────────────
   void _initDeepLinks() {
     if (kIsWeb) return;
     final appLinks = AppLinks();
@@ -181,9 +184,7 @@ class _AuthGateState extends State<AuthGate> {
       _subscribeToAuthEvents();
       return;
     }
-
     _subscribeToAuthEvents();
-
     final session = _supabase.auth.currentSession;
     if (session != null) {
       await _resolveAuthenticatedStatus();
@@ -196,7 +197,6 @@ class _AuthGateState extends State<AuthGate> {
     _authSub = _supabase.auth.onAuthStateChange.listen(
       (data) async {
         final event = data.event;
-
         if (event == AuthChangeEvent.tokenRefreshed) return;
 
         if (event == AuthChangeEvent.passwordRecovery) {
@@ -214,10 +214,7 @@ class _AuthGateState extends State<AuthGate> {
         }
 
         if (event == AuthChangeEvent.signedOut) {
-          // Only reset to unauthenticated if already in the app.
-          // Ignore signedOut events that fire during auth flows.
-          if (_status == _AuthStatus.authenticated ||
-              _status == _AuthStatus.needsRole) {
+          if (_status == _AuthStatus.authenticated) {
             _stopDeactivationWatcher();
             if (mounted) setState(() => _status = _AuthStatus.unauthenticated);
           }
@@ -230,13 +227,12 @@ class _AuthGateState extends State<AuthGate> {
     );
   }
 
-  // ── Resolve what screen to show after a successful sign-in ────────────────
+  // ── Resolve status ────────────────────────────────────────────────────────
   //
-  // Email-domain check happens FIRST, before any DB query:
-  //   Non-@cvsu.edu.ph (Google/OAuth) → auto-upsert guest → MainShell
-  //   @cvsu.edu.ph + no role set       → RoleSelectionScreen
-  //   @cvsu.edu.ph + role set          → MainShell
-  //   Deactivated                      → DeactivatedScreen + sign out
+  // Non-@cvsu.edu.ph → guest → MainShell
+  // @cvsu.edu.ph → role set by OTP screen from masterlist
+  //              → if role still empty (OTP write failed), recover from masterlist
+  //              → deactivated → DeactivatedScreen
   //
   Future<void> _resolveAuthenticatedStatus() async {
     final myCheckId = ++_checkId;
@@ -247,28 +243,25 @@ class _AuthGateState extends State<AuthGate> {
       return;
     }
 
-    // ── Non-CvSU users (Google / any OAuth) are always guest ─────────────
-    // Check domain first — before any DB query — so Google users NEVER
-    // hit RoleSelectionScreen, even if the upsert in login_screen.dart
-    // races with this auth event.
-    final email = (user.email ?? '').toLowerCase().trim();
-    if (!email.endsWith('@cvsu.edu.ph')) {
+    final email  = (user.email ?? '').toLowerCase().trim();
+    final isCvsu = email.endsWith('@cvsu.edu.ph');
+
+    // ── Non-CvSU (Google) → always guest ─────────────────────────────────
+    if (!isCvsu) {
       try {
         await _supabase.from('profiles').upsert({
           'id':         user.id,
           'role':       'guest',
           'updated_at': DateTime.now().toUtc().toIso8601String(),
         }, onConflict: 'id');
-      } catch (_) {
-        // Non-fatal — they still get into the app as guest.
-      }
+      } catch (_) {}
       if (!mounted || myCheckId != _checkId) return;
       _startDeactivationWatcher(user.id);
       setState(() => _status = _AuthStatus.authenticated);
       return;
     }
 
-    // ── CvSU users: check profile for role + active status ───────────────
+    // ── CvSU user → check profile ─────────────────────────────────────────
     try {
       final profile = await _supabase
           .from('profiles')
@@ -291,11 +284,12 @@ class _AuthGateState extends State<AuthGate> {
       final role = (profile?['role'] as String? ?? '').trim();
 
       if (role.isEmpty) {
-        // CvSU user who hasn't picked a role yet → RoleSelectionScreen.
-        if (mounted) setState(() => _status = _AuthStatus.needsRole);
-      } else {
-        if (mounted) setState(() => _status = _AuthStatus.authenticated);
+        // OTP screen write may have failed — recover from masterlist.
+        await _recoverRoleFromMasterlist(user.id, email);
+        if (!mounted || myCheckId != _checkId) return;
       }
+
+      if (mounted) setState(() => _status = _AuthStatus.authenticated);
     } catch (_) {
       if (!mounted || myCheckId != _checkId) return;
       _startDeactivationWatcher(user.id);
@@ -303,15 +297,39 @@ class _AuthGateState extends State<AuthGate> {
     }
   }
 
-  void _handleOtpVerified() {
-    // AuthGate's auth stream handles navigation automatically on signedIn.
+  /// Fallback: if profile has no role yet, pull from masterlist and write it.
+  Future<void> _recoverRoleFromMasterlist(String userId, String email) async {
+    try {
+      final row = await _supabase
+          .from('masterlist')
+          .select('role, full_name, student_id, department, course, year_level')
+          .eq('cvsu_email', email)
+          .eq('is_active', true)
+          .maybeSingle();
+
+      if (row == null) return; // Not in masterlist — profile stays empty, app still opens.
+
+      final rawYear  = row['year_level'];
+      final yearIdx  = rawYear is int ? rawYear : null;
+
+      await _supabase.from('profiles').upsert({
+        'id':         userId,
+        'full_name':  row['full_name'],
+        'role':       row['role'],
+        'student_id': row['student_id'],
+        'department': row['department'],
+        'course':     row['course'],
+        'year_level': yearIdx,
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      }, onConflict: 'id');
+    } catch (_) {
+      // Non-fatal — app still opens.
+    }
   }
 
-  void _handleGuestAuth() {
-    setState(() => _status = _AuthStatus.authenticated);
-  }
-
-  void _handleRoleSelected()  => setState(() => _status = _AuthStatus.authenticated);
+  // ── Callbacks ─────────────────────────────────────────────────────────────
+  void _handleOtpVerified() {}   // auth stream handles navigation
+  void _handleGuestAuth()  => setState(() => _status = _AuthStatus.authenticated);
   void _handleSignOut() {
     _stopDeactivationWatcher();
     setState(() => _status = _AuthStatus.unauthenticated);
@@ -332,12 +350,6 @@ class _AuthGateState extends State<AuthGate> {
             key:           const ValueKey('authNav'),
             onGuestAuth:   _handleGuestAuth,
             onOtpVerified: _handleOtpVerified,
-          ),
-
-        _AuthStatus.needsRole =>
-          RoleSelectionScreen(
-            key:            const ValueKey('roleSelection'),
-            onRoleSelected: _handleRoleSelected,
           ),
 
         _AuthStatus.authenticated =>
@@ -365,19 +377,14 @@ class _AuthGateState extends State<AuthGate> {
 // ── Splash ────────────────────────────────────────────────────────────────────
 class _SplashScreen extends StatelessWidget {
   const _SplashScreen();
-
   @override
-  Widget build(BuildContext context) {
-    return const Scaffold(
-      backgroundColor: AppColors.background,
-      body: Center(
-        child: CircularProgressIndicator(color: AppColors.primary),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => const Scaffold(
+    backgroundColor: AppColors.background,
+    body: Center(child: CircularProgressIndicator(color: AppColors.primary)),
+  );
 }
 
-// ── Deactivated screen ────────────────────────────────────────────────────────
+// ── Deactivated ───────────────────────────────────────────────────────────────
 class _DeactivatedScreen extends StatelessWidget {
   final VoidCallback onClose;
   const _DeactivatedScreen({super.key, required this.onClose});
@@ -390,49 +397,42 @@ class _DeactivatedScreen extends StatelessWidget {
         child: Center(
           child: Padding(
             padding: const EdgeInsets.all(32),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 80, height: 80,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFEE2E2),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: const Icon(Icons.shield_outlined,
-                      size: 40, color: Color(0xFFDC2626)),
-                ),
-                const SizedBox(height: 24),
-                const Text('Account Deactivated',
-                    style: TextStyle(
-                        fontSize: 22, fontWeight: FontWeight.w800,
-                        color: Color(0xFF1A2E1A)),
-                    textAlign: TextAlign.center),
-                const SizedBox(height: 12),
-                const Text(
-                  'Your account has been deactivated by an administrator.\n\n'
-                  'Please contact your administrator for assistance.',
-                  style: TextStyle(
-                      fontSize: 14, color: Color(0xFF6B7280), height: 1.6),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Container(
+                width: 80, height: 80,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFEE2E2),
+                  borderRadius: BorderRadius.circular(20)),
+                child: const Icon(Icons.shield_outlined,
+                    size: 40, color: Color(0xFFDC2626)),
+              ),
+              const SizedBox(height: 24),
+              const Text('Account Deactivated',
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800,
+                      color: Color(0xFF1A2E1A)),
                   textAlign: TextAlign.center),
-                const SizedBox(height: 32),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: onClose,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFDC2626),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10))),
-                    child: const Text('OK',
-                        style: TextStyle(
-                            fontSize: 15, fontWeight: FontWeight.w700)),
-                  ),
+              const SizedBox(height: 12),
+              const Text(
+                'Your account has been deactivated by an administrator.\n\n'
+                'Please contact your administrator for assistance.',
+                style: TextStyle(fontSize: 14, color: Color(0xFF6B7280), height: 1.6),
+                textAlign: TextAlign.center),
+              const SizedBox(height: 32),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: onClose,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFDC2626),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10))),
+                  child: const Text('OK',
+                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
                 ),
-              ],
-            ),
+              ),
+            ]),
           ),
         ),
       ),
@@ -458,29 +458,48 @@ class _AuthNavigator extends StatefulWidget {
 }
 
 class _AuthNavigatorState extends State<_AuthNavigator> {
-  _AuthView _view        = _AuthView.login;
-  String?   _otpEmail;
-  String?   _otpFullName;
+  _AuthView _view = _AuthView.login;
+
+  // Signup OTP data — includes masterlist fields
+  String?  _otpEmail;
+  String?  _otpFullName;
+  String   _otpRole       = '';
+  String?  _otpStudentId;
+  String?  _otpDepartment;
+  String?  _otpCourse;
+  int?     _otpYearLevel;
+
+  // Login OTP data
+  String?  _loginOtpEmail;
 
   void _goToLogin()  => setState(() => _view = _AuthView.login);
   void _goToSignup() => setState(() => _view = _AuthView.signup);
 
   void _goToSignupOtp({
-    required String email,
-    required String fullName,
+    required String  email,
+    required String  fullName,
+    required String  role,
+    required String? studentId,
+    required String? department,
+    required String? course,
+    required int?    yearLevel,
   }) {
     setState(() {
-      _otpEmail    = email;
-      _otpFullName = fullName;
-      _view        = _AuthView.signupOtp;
+      _otpEmail      = email;
+      _otpFullName   = fullName;
+      _otpRole       = role;
+      _otpStudentId  = studentId;
+      _otpDepartment = department;
+      _otpCourse     = course;
+      _otpYearLevel  = yearLevel;
+      _view          = _AuthView.signupOtp;
     });
   }
 
   void _goToLoginOtp({ required String email }) {
     setState(() {
-      _otpEmail    = email;
-      _otpFullName = '';
-      _view        = _AuthView.loginOtp;
+      _loginOtpEmail = email;
+      _view          = _AuthView.loginOtp;
     });
   }
 
@@ -500,8 +519,23 @@ class _AuthNavigatorState extends State<_AuthNavigator> {
         _AuthView.signup => SignupScreen(
           key:           const ValueKey('signup'),
           onGoLogin:     _goToLogin,
-          onNeedsOtp:    ({required String email, required String fullName}) =>
-              _goToSignupOtp(email: email, fullName: fullName),
+          onNeedsOtp:    ({
+            required String  email,
+            required String  fullName,
+            required String  role,
+            required String? studentId,
+            required String? department,
+            required String? course,
+            required int?    yearLevel,
+          }) => _goToSignupOtp(
+            email:      email,
+            fullName:   fullName,
+            role:       role,
+            studentId:  studentId,
+            department: department,
+            course:     course,
+            yearLevel:  yearLevel,
+          ),
           onGuestSignup: widget.onGuestAuth,
         ),
 
@@ -509,13 +543,18 @@ class _AuthNavigatorState extends State<_AuthNavigator> {
           key:        const ValueKey('signupOtp'),
           email:      _otpEmail!,
           fullName:   _otpFullName!,
+          role:       _otpRole,
+          studentId:  _otpStudentId,
+          department: _otpDepartment,
+          course:     _otpCourse,
+          yearLevel:  _otpYearLevel,
           onVerified: widget.onOtpVerified,
           onBack:     _goToSignup,
         ),
 
         _AuthView.loginOtp => OtpScreen(
           key:        const ValueKey('loginOtp'),
-          email:      _otpEmail!,
+          email:      _loginOtpEmail!,
           fullName:   '',
           onVerified: widget.onOtpVerified,
           onBack:     _goToLogin,
