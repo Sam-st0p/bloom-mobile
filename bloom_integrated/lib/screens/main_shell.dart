@@ -13,17 +13,26 @@ import 'notification_provider.dart';
 
 class MainShell extends StatefulWidget {
   final VoidCallback onSignOut;
-  const MainShell({super.key, required this.onSignOut});
+
+  /// Role resolved by AuthGate before navigating here.
+  /// Passed straight to HomeScreen so it never needs to re-query
+  /// the profile just to show the role pill — avoiding the race
+  /// condition where HomeScreen reads 'student' before AuthGate
+  /// finishes writing 'guest' for Google users.
+  final String resolvedRole;
+
+  const MainShell({
+    super.key,
+    required this.onSignOut,
+    this.resolvedRole = '',   // empty = HomeScreen fetches it normally
+  });
+
   @override
   State<MainShell> createState() => _MainShellState();
 }
 
 class _MainShellState extends State<MainShell> {
   int _currentIndex = 0;
-
-  // Sub-tab hints passed to EventsScreen and BadgesScreen.
-  // Stored as int to match the initialTab: int constructor parameter.
-  // 0 = first tab (seminars / achievements), 1 = second tab (calendar / certificates)
   int _eventsInitialTab = 0;
   int _badgesInitialTab = 0;
 
@@ -50,7 +59,6 @@ class _MainShellState extends State<MainShell> {
   void _navigateTo(int index) {
     setState(() {
       _currentIndex = index;
-      // Reset sub-tab hints to default when user taps nav bar directly
       if (index == 2) _eventsInitialTab = 0;
       if (index == 3) _badgesInitialTab = 0;
     });
@@ -68,43 +76,20 @@ class _MainShellState extends State<MainShell> {
     ).then((result) {
       if (result == null) return;
       switch (result) {
-        // ── Library ────────────────────────────────────────────
         case NavResult.library:
-          setState(() {
-            _currentIndex = 1;
-          });
+          setState(() { _currentIndex = 1; });
           break;
-
-        // ── Events tab → Seminars sub-tab (index 0) ───────────
         case NavResult.events:
-          setState(() {
-            _eventsInitialTab = 0;
-            _currentIndex     = 2;
-          });
+          setState(() { _eventsInitialTab = 0; _currentIndex = 2; });
           break;
-
-        // ── Events tab → Calendar sub-tab (index 1) ───────────
         case NavResult.calendar:
-          setState(() {
-            _eventsInitialTab = 1;
-            _currentIndex     = 2;
-          });
+          setState(() { _eventsInitialTab = 1; _currentIndex = 2; });
           break;
-
-        // ── Badges tab → Achievements sub-tab (index 0) ───────
         case NavResult.achievements:
-          setState(() {
-            _badgesInitialTab = 0;
-            _currentIndex     = 3;
-          });
+          setState(() { _badgesInitialTab = 0; _currentIndex = 3; });
           break;
-
-        // ── Badges tab → Certificates sub-tab (index 1) ───────
         case NavResult.certificates:
-          setState(() {
-            _badgesInitialTab = 1;
-            _currentIndex     = 3;
-          });
+          setState(() { _badgesInitialTab = 1; _currentIndex = 3; });
           break;
       }
     });
@@ -119,9 +104,8 @@ class _MainShellState extends State<MainShell> {
         onSwitchTab:         _navigateTo,
         onOpenNotifications: _openNotifications,
         unreadCount:         unreadCount,
+        resolvedRole:        widget.resolvedRole,   // ← passed in, no extra query
         onJoinLive: (seminar) {
-          // Land on the Seminars sub-tab of Events, same as the
-          // notifications "events" result does.
           setState(() {
             _eventsInitialTab = 0;
             _currentIndex     = 2;
@@ -155,11 +139,11 @@ class _MainShellState extends State<MainShell> {
               height: 64,
               child: Row(
                 children: [
-                  _NavItem(icon: Icons.home_outlined,           activeIcon: Icons.home_rounded,           label: 'Home',         index: 0, currentIndex: _currentIndex, onTap: _navigateTo),
-                  _NavItem(icon: Icons.menu_book_outlined,      activeIcon: Icons.menu_book_rounded,      label: 'Library',      index: 1, currentIndex: _currentIndex, onTap: _navigateTo),
-                  _NavItem(icon: Icons.calendar_today_outlined, activeIcon: Icons.calendar_today_rounded, label: 'Events',       index: 2, currentIndex: _currentIndex, onTap: _navigateTo),
-                  _NavItem(icon: Icons.emoji_events_outlined,   activeIcon: Icons.emoji_events_rounded,   label: 'Achievement',  index: 3, currentIndex: _currentIndex, onTap: _navigateTo),
-                  _NavItem(icon: Icons.person_outline_rounded,  activeIcon: Icons.person_rounded,         label: 'Profile',      index: 4, currentIndex: _currentIndex, onTap: _navigateTo),
+                  _NavItem(icon: Icons.home_outlined,           activeIcon: Icons.home_rounded,           label: 'Home',        index: 0, currentIndex: _currentIndex, onTap: _navigateTo),
+                  _NavItem(icon: Icons.menu_book_outlined,      activeIcon: Icons.menu_book_rounded,      label: 'Library',     index: 1, currentIndex: _currentIndex, onTap: _navigateTo),
+                  _NavItem(icon: Icons.calendar_today_outlined, activeIcon: Icons.calendar_today_rounded, label: 'Events',      index: 2, currentIndex: _currentIndex, onTap: _navigateTo),
+                  _NavItem(icon: Icons.emoji_events_outlined,   activeIcon: Icons.emoji_events_rounded,   label: 'Achievement', index: 3, currentIndex: _currentIndex, onTap: _navigateTo),
+                  _NavItem(icon: Icons.person_outline_rounded,  activeIcon: Icons.person_rounded,         label: 'Profile',     index: 4, currentIndex: _currentIndex, onTap: _navigateTo),
                 ],
               ),
             ),

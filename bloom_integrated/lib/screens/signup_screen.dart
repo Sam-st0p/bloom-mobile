@@ -11,8 +11,6 @@ import '../services/auth_service.dart';
 class SignupScreen extends StatefulWidget {
   final VoidCallback onGoLogin;
 
-  // Expanded signature — passes masterlist data straight to OtpScreen
-  // so it can write the profile without a second masterlist query.
   final void Function({
     required String  email,
     required String  fullName,
@@ -23,7 +21,6 @@ class SignupScreen extends StatefulWidget {
     required int?    yearLevel,
   }) onNeedsOtp;
 
-  /// Called after Google sign-up so the shell skips role selection (guest)
   final VoidCallback? onGuestSignup;
 
   const SignupScreen({
@@ -60,13 +57,9 @@ class _SignupScreenState extends State<SignupScreen> {
     super.dispose();
   }
 
-  // ── Helpers ──────────────────────────────────────────────────────────────
-
   bool get _isCvsuEmail =>
       RegExp(r'^[^@]+@cvsu\.edu\.ph$')
           .hasMatch(_emailCtrl.text.trim().toLowerCase());
-
-  // ── Email/password signup ─────────────────────────────────────────────────
 
   Future<void> _handleSignup() async {
     if (_loading) return;
@@ -74,7 +67,6 @@ class _SignupScreenState extends State<SignupScreen> {
 
     if (!_formKey.currentState!.validate()) return;
 
-    // Guard 1: domain check
     if (!_isCvsuEmail) {
       setState(() => _error =
           'Only @cvsu.edu.ph institutional emails can create an account here.\n'
@@ -86,21 +78,30 @@ class _SignupScreenState extends State<SignupScreen> {
 
     final cleanEmail = AppValidators.normalizeEmail(_emailCtrl.text);
 
-    // Guard 2: masterlist check — blocks unregistered emails before signUp()
+    // ── Guard 1: masterlist check ─────────────────────────────────────
     final masterlistError = await AuthService.checkMasterlist(cleanEmail);
     if (!mounted) return;
-
     if (masterlistError != null) {
       setState(() { _error = masterlistError; _loading = false; });
       return;
     }
 
-    // Fetch the masterlist entry so we can pass it to OtpScreen directly.
-    // This avoids a second masterlist query after OTP verification.
+    // ── Guard 2: duplicate account check ──────────────────────────────
+    // Supabase silently re-sends OTP for already-registered emails when
+    // email confirmation is on, returning no error. We detect this by
+    // checking the profiles table — if a row exists, the account is taken.
+    final duplicateError = await AuthService.checkEmailAlreadyRegistered(cleanEmail);
+    if (!mounted) return;
+    if (duplicateError != null) {
+      setState(() { _error = duplicateError; _loading = false; });
+      return;
+    }
+
+    // ── Fetch masterlist entry to pass to OtpScreen ───────────────────
     final entry = await AuthService.getMasterlistEntry(cleanEmail);
     if (!mounted) return;
 
-    // Guard 3: create the Supabase Auth user + send OTP email
+    // ── Guard 3: create Supabase Auth user + send OTP ─────────────────
     final fullName = '${_firstNameCtrl.text.trim()} ${_lastNameCtrl.text.trim()}';
 
     final error = await AuthService.signUp(
@@ -117,7 +118,6 @@ class _SignupScreenState extends State<SignupScreen> {
       return;
     }
 
-    // Success — pass masterlist data to OtpScreen so it can write the profile
     widget.onNeedsOtp(
       email:      cleanEmail,
       fullName:   fullName,
@@ -128,8 +128,6 @@ class _SignupScreenState extends State<SignupScreen> {
       yearLevel:  entry?['year_level'] as int?,
     );
   }
-
-  // ── Google signup → auto-assign guest ────────────────────────────────────
 
   Future<void> _handleGoogleSignup() async {
     if (_loading) return;
@@ -506,8 +504,6 @@ class _SignupScreenState extends State<SignupScreen> {
     );
   }
 
-  // ── Helpers ───────────────────────────────────────────────────────────────
-
   Widget _buildStrengthBar(String password) {
     if (password.isEmpty) return const SizedBox(height: 6);
     final score  = AppValidators.passwordStrength(password);
@@ -553,8 +549,7 @@ class _SignupScreenState extends State<SignupScreen> {
       autovalidateMode: AutovalidateMode.onUserInteraction,
       decoration: InputDecoration(
         hintText:   hint,
-        hintStyle:  GoogleFonts.nunito(
-            color: AppColors.textLight, fontSize: 13),
+        hintStyle:  GoogleFonts.nunito(color: AppColors.textLight, fontSize: 13),
         prefixIcon: Icon(icon, color: AppColors.textLight, size: 20),
         suffixIcon: suffix,
         filled:     true,
@@ -567,15 +562,13 @@ class _SignupScreenState extends State<SignupScreen> {
             borderSide: const BorderSide(color: AppColors.border)),
         focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide:
-                const BorderSide(color: AppColors.primary, width: 2)),
+            borderSide: const BorderSide(color: AppColors.primary, width: 2)),
         errorBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
             borderSide: const BorderSide(color: AppColors.danger)),
         focusedErrorBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide:
-                const BorderSide(color: AppColors.danger, width: 2)),
+            borderSide: const BorderSide(color: AppColors.danger, width: 2)),
       ),
     );
   }

@@ -15,7 +15,6 @@ class AuthService {
     try {
       await _supabase.auth.signInWithPassword(
         email: email, password: password);
-      // Immediately destroy session — OTP must complete login
       await _supabase.auth.signOut(scope: SignOutScope.local);
       return null;
     } on AuthException catch (e) {
@@ -37,11 +36,9 @@ class AuthService {
   static Future<String?> signIn(String email, String password) async {
     final cleanEmail = AppValidators.normalizeEmail(email);
 
-    // Step 1: validate credentials
     final credError = await validateCredentials(cleanEmail, password);
     if (credError != null) return credError;
 
-    // Step 2: check is_active BEFORE sending OTP
     try {
       final authRes = await _supabase.auth.signInWithPassword(
         email: cleanEmail, password: password);
@@ -67,7 +64,6 @@ class AuthService {
       try { await _supabase.auth.signOut(scope: SignOutScope.local); } catch (_) {}
     }
 
-    // Step 3: send OTP
     try {
       await _supabase.auth.signInWithOtp(
         email:            cleanEmail,
@@ -101,9 +97,30 @@ class AuthService {
     }
   }
 
+  // ── Check if email is already registered ──────────────────────────
+  // Uses the is_email_already_registered RPC which queries auth.users
+  // directly — the ground truth for whether an account exists.
+  // This is necessary because Supabase silently re-sends OTP for
+  // duplicate signups when email confirmation is enabled, returning
+  // no error, which causes the app to navigate to OTP as if new.
+  static Future<String?> checkEmailAlreadyRegistered(String email) async {
+    try {
+      final result = await _supabase.rpc(
+        'is_email_already_registered',
+        params: {'lookup_email': email},
+      );
+
+      if (result == true) {
+        return 'An account with this email already exists. Try signing in.';
+      }
+      return null;
+    } catch (_) {
+      // If the RPC fails, fall through — signUp() will catch it as backup.
+      return null;
+    }
+  }
+
   // ── Fetch a single masterlist row for the given email ──────────────
-  // Returns the row map (role, full_name, student_id, department,
-  // course, year_level) or null if not found / error.
   static Future<Map<String, dynamic>?> getMasterlistEntry(String email) async {
     try {
       final row = await _supabase
@@ -119,9 +136,6 @@ class AuthService {
   }
 
   // ── Apply masterlist data to profiles after OTP verification ───────
-  // Called from OtpScreen._verify() immediately after verifyOTP()
-  // succeeds. Writes role + academic info so the user goes straight
-  // to Home without ever seeing a role-selection screen.
   static Future<String?> applyMasterlistProfile({
     required String email,
     required String fullName,
@@ -133,8 +147,6 @@ class AuthService {
       final entry = await getMasterlistEntry(email);
 
       if (entry == null) {
-        // Masterlist row missing — write a minimal profile and let
-        // AuthGate send the user to RoleSelectionScreen as a fallback.
         await _supabase.from('profiles').upsert({
           'id':        user.id,
           'full_name': AppValidators.sanitizeName(fullName),
@@ -145,13 +157,12 @@ class AuthService {
         return null;
       }
 
-      // Build profile data from the masterlist row
       final Map<String, dynamic> profileData = {
         'id':        user.id,
         'full_name': AppValidators.sanitizeName(fullName),
         'email':     email,
         'is_active': true,
-        'role':      entry['role'],           // auto-assigned — no manual selection
+        'role':      entry['role'],
       };
 
       if (entry['student_id'] != null) profileData['student_id'] = entry['student_id'];
@@ -165,7 +176,7 @@ class AuthService {
         ignoreDuplicates: false,
       );
 
-      return null; // success
+      return null;
     } catch (e) {
       return 'Failed to set up your profile. Please contact support.';
     }
@@ -202,7 +213,6 @@ class AuthService {
   }
 
   // ── Complete profile after OTP verified (legacy fallback) ──────────
-  // Kept for any callers that haven't migrated to applyMasterlistProfile.
   static Future<void> signUpCompleteProfile({
     required String email,
     required String fullName,

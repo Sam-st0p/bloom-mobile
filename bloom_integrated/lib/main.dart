@@ -3,6 +3,7 @@
 //
 // Role routing rules:
 //   • Non-@cvsu.edu.ph (Google) → always guest → MainShell
+//     (role is force-written to 'guest' every sign-in, no exceptions)
 //   • @cvsu.edu.ph → role already written at OTP verification from masterlist
 //                  → AuthGate checks role → MainShell
 //   • role empty (edge case: OTP write failed) → query masterlist again,
@@ -93,6 +94,7 @@ class _AuthGateState extends State<AuthGate> {
   RealtimeChannel?    _profileChannel;
   Timer?              _pollTimer;
   int                 _checkId = 0;
+  String               _resolvedRole = ''; // role determined by _resolveAuthenticatedStatus
 
   final _supabase = Supabase.instance.client;
 
@@ -229,7 +231,8 @@ class _AuthGateState extends State<AuthGate> {
 
   // ── Resolve status ────────────────────────────────────────────────────────
   //
-  // Non-@cvsu.edu.ph → guest → MainShell
+  // Non-@cvsu.edu.ph → force role='guest' every time → MainShell
+  //   (overwrites any previously incorrect role — no exceptions)
   // @cvsu.edu.ph → role set by OTP screen from masterlist
   //              → if role still empty (OTP write failed), recover from masterlist
   //              → deactivated → DeactivatedScreen
@@ -246,16 +249,22 @@ class _AuthGateState extends State<AuthGate> {
     final email  = (user.email ?? '').toLowerCase().trim();
     final isCvsu = email.endsWith('@cvsu.edu.ph');
 
-    // ── Non-CvSU (Google) → always guest ─────────────────────────────────
+    // ── Non-CvSU (Google/any OAuth) → always guest ───────────────────────
+    // Force-write role='guest' unconditionally on every sign-in.
+    // This corrects any previously wrong role (e.g. 'student' from a test)
+    // and ensures Google users can never accumulate a CvSU role.
     if (!isCvsu) {
       try {
         await _supabase.from('profiles').upsert({
           'id':         user.id,
+          'email':      email,
           'role':       'guest',
+          'is_active':  true,
           'updated_at': DateTime.now().toUtc().toIso8601String(),
         }, onConflict: 'id');
       } catch (_) {}
       if (!mounted || myCheckId != _checkId) return;
+      _resolvedRole = 'guest';
       _startDeactivationWatcher(user.id);
       setState(() => _status = _AuthStatus.authenticated);
       return;
@@ -285,10 +294,12 @@ class _AuthGateState extends State<AuthGate> {
 
       if (role.isEmpty) {
         // OTP screen write may have failed — recover from masterlist.
+        // Safe: only runs for @cvsu.edu.ph users (isCvsu == true above).
         await _recoverRoleFromMasterlist(user.id, email);
         if (!mounted || myCheckId != _checkId) return;
       }
 
+      _resolvedRole = role.isNotEmpty ? role : 'student';
       if (mounted) setState(() => _status = _AuthStatus.authenticated);
     } catch (_) {
       if (!mounted || myCheckId != _checkId) return;
@@ -297,8 +308,14 @@ class _AuthGateState extends State<AuthGate> {
     }
   }
 
-  /// Fallback: if profile has no role yet, pull from masterlist and write it.
+  /// Fallback: if a CvSU profile has no role yet, pull from masterlist and write it.
+  /// NEVER called for non-CvSU users — guarded by isCvsu check above.
   Future<void> _recoverRoleFromMasterlist(String userId, String email) async {
+    // Extra safety guard — should never be needed given the isCvsu check,
+    // but prevents any future refactor from accidentally calling this for
+    // Google users.
+    if (!email.endsWith('@cvsu.edu.ph')) return;
+
     try {
       final row = await _supabase
           .from('masterlist')
@@ -309,8 +326,8 @@ class _AuthGateState extends State<AuthGate> {
 
       if (row == null) return; // Not in masterlist — profile stays empty, app still opens.
 
-      final rawYear  = row['year_level'];
-      final yearIdx  = rawYear is int ? rawYear : null;
+      final rawYear = row['year_level'];
+      final yearIdx = rawYear is int ? rawYear : null;
 
       await _supabase.from('profiles').upsert({
         'id':         userId,
@@ -354,8 +371,9 @@ class _AuthGateState extends State<AuthGate> {
 
         _AuthStatus.authenticated =>
           MainShell(
-            key:       const ValueKey('mainShell'),
-            onSignOut: _handleSignOut,
+            key:          const ValueKey('mainShell'),
+            onSignOut:    _handleSignOut,
+            resolvedRole: _resolvedRole,
           ),
 
         _AuthStatus.passwordRecovery =>
@@ -460,7 +478,6 @@ class _AuthNavigator extends StatefulWidget {
 class _AuthNavigatorState extends State<_AuthNavigator> {
   _AuthView _view = _AuthView.login;
 
-  // Signup OTP data — includes masterlist fields
   String?  _otpEmail;
   String?  _otpFullName;
   String   _otpRole       = '';
@@ -468,8 +485,6 @@ class _AuthNavigatorState extends State<_AuthNavigator> {
   String?  _otpDepartment;
   String?  _otpCourse;
   int?     _otpYearLevel;
-
-  // Login OTP data
   String?  _loginOtpEmail;
 
   void _goToLogin()  => setState(() => _view = _AuthView.login);
@@ -519,7 +534,7 @@ class _AuthNavigatorState extends State<_AuthNavigator> {
         _AuthView.signup => SignupScreen(
           key:           const ValueKey('signup'),
           onGoLogin:     _goToLogin,
-          onNeedsOtp:    ({
+          onNeedsOtp: ({
             required String  email,
             required String  fullName,
             required String  role,

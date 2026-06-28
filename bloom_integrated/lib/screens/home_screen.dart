@@ -8,33 +8,26 @@ import '../models/models.dart';
 import '../widgets/common_widgets.dart';
 import '../services/activity_service.dart';
 
-// ----------------------------------------------------------------------------
-// Lightweight view model for the live-now banner (no dedicated table/model
-// exists for this yet — see ASSUMPTION notes above).
-// ----------------------------------------------------------------------------
 class LiveSeminar {
   final String id;
   final String title;
   final int attendees;
-  final String statusLabel; // e.g. "happening now"
+  final String statusLabel;
   const LiveSeminar(this.id, this.title, this.attendees, this.statusLabel);
 }
 
 class HomeScreen extends StatefulWidget {
-  /// Tab switcher from MainShell (0=Home,1=Library,2=Events,3=Achievement,4=Profile).
   final void Function(int tabIndex) onSwitchTab;
-
-  /// Opens the Notifications screen.
   final VoidCallback onOpenNotifications;
-
-  /// Unread notification count, owned by the parent (same source the
-  /// previous screen used) so the bell badge stays in sync app-wide.
   final int unreadCount;
-
-  /// Opens the in-app Virtual Conference room for a live seminar.
-  /// Optional — if not provided, tapping the live banner just switches to
-  /// the Events tab.
   final void Function(LiveSeminar seminar)? onJoinLive;
+
+  /// Role pre-resolved by AuthGate and passed down through MainShell.
+  /// When non-empty, HomeScreen uses this directly instead of reading
+  /// from the DB — eliminating the race condition where Google users
+  /// see 'Student' before the guest upsert finishes.
+  /// When empty (default), falls back to the DB value as before.
+  final String resolvedRole;
 
   const HomeScreen({
     super.key,
@@ -42,6 +35,7 @@ class HomeScreen extends StatefulWidget {
     required this.onOpenNotifications,
     required this.unreadCount,
     this.onJoinLive,
+    this.resolvedRole = '',
   });
 
   @override
@@ -53,7 +47,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   String _firstName = '';
   String _fullName = '';
-  String _role = 'student';
+  String _role = '';
   int _completedModules = 0;
   int _totalModules = 0;
   int _badgeCount = 0;
@@ -69,6 +63,11 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    // Seed the role immediately from the resolved value so the pill
+    // shows the correct label even before the DB fetch completes.
+    if (widget.resolvedRole.isNotEmpty) {
+      _role = widget.resolvedRole;
+    }
     _loadAll();
     ActivityService.log(activityType: 'screen_view', referenceType: 'home');
   }
@@ -136,22 +135,27 @@ class _HomeScreenState extends State<HomeScreen> {
       if (mounted) {
         setState(() {
           final fullName = profile?['full_name'] as String? ?? '';
-          _fullName = fullName.isEmpty ? 'Welcome!' : fullName;
+          _fullName  = fullName.isEmpty ? 'Welcome!' : fullName;
           _firstName = fullName.isEmpty ? '' : fullName.split(' ').first;
-          _role = profile?['role'] as String? ?? 'student';
-          _totalModules = allModules.length;
-          _completedModules =
-              allModules.where((m) => m.progress == 100).length;
+
+          // Use resolvedRole if provided — it was already written to DB
+          // by AuthGate before navigation, so it's the authoritative value.
+          // Fall back to DB value only when resolvedRole was not supplied.
+          final dbRole = profile?['role'] as String? ?? '';
+          _role = widget.resolvedRole.isNotEmpty ? widget.resolvedRole : dbRole;
+
+          _totalModules     = allModules.length;
+          _completedModules = allModules.where((m) => m.progress == 100).length;
           _inProgressModules = allModules
               .where((m) => m.progress > 0 && m.progress < 100)
               .toList();
-          _badgeCount = (badgesData as List).length;
+          _badgeCount   = (badgesData as List).length;
           _seminarCount = (seminarData as List).length;
           _upcomingEvents = (eventsData as List)
               .map((e) => EventModel.fromMap(e as Map<String, dynamic>))
               .toList();
           _announcements = List<Map<String, dynamic>>.from(announcementsData);
-          _live = live;
+          _live    = live;
           _loading = false;
         });
       }
@@ -160,8 +164,6 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // Isolated on purpose — a schema mismatch here should never take down
-  // the rest of the home screen. See ASSUMPTION notes at the top of file.
   Future<LiveSeminar?> _fetchLiveSeminar() async {
     try {
       final nowIso = DateTime.now().toIso8601String();
@@ -183,9 +185,7 @@ class _HomeScreenState extends State<HomeScreen> {
             .select('id')
             .eq('event_id', row['id']);
         attendees = (regs as List).length;
-      } catch (_) {
-        // Attendee count is a nice-to-have, not required for the banner.
-      }
+      } catch (_) {}
 
       return LiveSeminar(
         row['id'].toString(),
@@ -207,14 +207,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
   String _roleLabel() {
     switch (_role) {
-      case 'teacher':
-        return 'Teacher';
-      case 'faculty':
-        return 'Faculty';
-      case 'guest':
-        return 'Guest';
-      default:
-        return 'Student';
+      case 'teacher': return 'Teacher';
+      case 'faculty': return 'Faculty';
+      case 'guest':   return 'Guest';
+      case 'student': return 'Student';
+      default:        return _role.isEmpty ? 'Student' : _role;
     }
   }
 
@@ -339,7 +336,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ---- Header with avatar, greeting, role pill, bell, and progress ring ----
   Widget _header() {
     return GradientHeader(
       bottomPadding: 20,
@@ -352,8 +348,7 @@ class _HomeScreenState extends State<HomeScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Container(
-                  width: 46,
-                  height: 46,
+                  width: 46, height: 46,
                   decoration: BoxDecoration(
                     color: Colors.white.withValues(alpha: 0.22),
                     shape: BoxShape.circle,
@@ -426,8 +421,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return GestureDetector(
       onTap: widget.onOpenNotifications,
       child: Container(
-        width: 44,
-        height: 44,
+        width: 44, height: 44,
         decoration: BoxDecoration(
           color: Colors.white.withValues(alpha: 0.2),
           borderRadius: BorderRadius.circular(14),
@@ -438,8 +432,7 @@ class _HomeScreenState extends State<HomeScreen> {
             const Icon(Icons.notifications_outlined, color: Colors.white, size: 22),
             if (widget.unreadCount > 0)
               Positioned(
-                top: 8,
-                right: 8,
+                top: 8, right: 8,
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 4),
                   constraints: const BoxConstraints(minWidth: 16),
@@ -475,8 +468,7 @@ class _HomeScreenState extends State<HomeScreen> {
       child: Row(
         children: [
           SizedBox(
-            width: 64,
-            height: 64,
+            width: 64, height: 64,
             child: CustomPaint(
               painter: _RingPainter(_overall / 100),
               child: Center(
@@ -522,16 +514,12 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ---- Quick actions ----------------------------------------------------
   Widget _quickActions() {
-    // index 1 = Library, 2 = Events, 3 = Achievement (see ASSUMPTION #3
-    // above re: the Forum tile — it still points at index 0 from the
-    // original mockup until that tab exists).
     final items = [
-      (Icons.menu_book_rounded, 'Modules', AppColors.primary, 1),
-      (Icons.school_rounded, 'Seminars', AppColors.purple, 2),
-      (Icons.workspace_premium_rounded, 'Certificates', AppColors.accent, 3),
-      (Icons.forum_rounded, 'Forum', AppColors.info, 0),
+      (Icons.menu_book_rounded,          'Modules',      AppColors.primary, 1),
+      (Icons.school_rounded,             'Seminars',     AppColors.purple,  2),
+      (Icons.workspace_premium_rounded,  'Certificates', AppColors.accent,  3),
+      (Icons.forum_rounded,              'Forum',        AppColors.info,    0),
     ];
     return Row(
       children: items.map((it) {
@@ -542,8 +530,7 @@ class _HomeScreenState extends State<HomeScreen> {
             child: Column(
               children: [
                 Container(
-                  width: 52,
-                  height: 52,
+                  width: 52, height: 52,
                   decoration: BoxDecoration(
                     color: it.$3.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(16),
@@ -568,7 +555,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ---- Upcoming events strip --------------------------------------------
   Widget _upcomingStrip() {
     return SizedBox(
       height: 150,
@@ -585,9 +571,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-// ----------------------------------------------------------------------------
-// Live-now banner
-// ----------------------------------------------------------------------------
+// ── Live banner ───────────────────────────────────────────────────────────────
 class _LiveBanner extends StatelessWidget {
   final LiveSeminar seminar;
   final VoidCallback onTap;
@@ -617,8 +601,7 @@ class _LiveBanner extends StatelessWidget {
         child: Row(
           children: [
             Container(
-              width: 46,
-              height: 46,
+              width: 46, height: 46,
               decoration: BoxDecoration(
                 color: Colors.white.withValues(alpha: 0.2),
                 borderRadius: BorderRadius.circular(14),
@@ -633,20 +616,18 @@ class _LiveBanner extends StatelessWidget {
                   Row(
                     children: [
                       Container(
-                        width: 7,
-                        height: 7,
-                        decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
+                        width: 7, height: 7,
+                        decoration: const BoxDecoration(
+                            color: Colors.white, shape: BoxShape.circle),
                       ),
                       const SizedBox(width: 6),
-                      Text(
-                        'LIVE NOW',
-                        style: GoogleFonts.nunito(
-                          color: Colors.white,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: 0.6,
-                        ),
-                      ),
+                      Text('LIVE NOW',
+                          style: GoogleFonts.nunito(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 0.6,
+                          )),
                     ],
                   ),
                   const SizedBox(height: 4),
@@ -684,16 +665,15 @@ class _LiveBanner extends StatelessWidget {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.login_rounded, color: Color(0xFF0E7A38), size: 15),
+                  const Icon(Icons.login_rounded,
+                      color: Color(0xFF0E7A38), size: 15),
                   const SizedBox(width: 4),
-                  Text(
-                    'Join',
-                    style: GoogleFonts.nunito(
-                      color: const Color(0xFF0E7A38),
-                      fontSize: 12,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
+                  Text('Join',
+                      style: GoogleFonts.nunito(
+                        color: const Color(0xFF0E7A38),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w900,
+                      )),
                 ],
               ),
             ),
@@ -704,9 +684,7 @@ class _LiveBanner extends StatelessWidget {
   }
 }
 
-// ----------------------------------------------------------------------------
-// Resume hero card — first in-progress module
-// ----------------------------------------------------------------------------
+// ── Resume hero ───────────────────────────────────────────────────────────────
 class _ResumeHero extends StatelessWidget {
   final ModuleModel module;
   final VoidCallback onTap;
@@ -751,14 +729,12 @@ class _ResumeHero extends StatelessWidget {
                       color: Colors.white.withValues(alpha: 0.22),
                       borderRadius: BorderRadius.circular(20),
                     ),
-                    child: Text(
-                      'In progress',
-                      style: GoogleFonts.nunito(
-                        color: Colors.white,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
+                    child: Text('In progress',
+                        style: GoogleFonts.nunito(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                        )),
                   ),
                   const SizedBox(height: 8),
                   Text(
@@ -783,14 +759,12 @@ class _ResumeHero extends StatelessWidget {
                       children: [
                         AppProgressBar(value: module.progress),
                         const SizedBox(height: 5),
-                        Text(
-                          '${module.progress}% complete',
-                          style: GoogleFonts.nunito(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: AppColors.textLight,
-                          ),
-                        ),
+                        Text('${module.progress}% complete',
+                            style: GoogleFonts.nunito(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textLight,
+                            )),
                       ],
                     ),
                   ),
@@ -811,16 +785,15 @@ class _ResumeHero extends StatelessWidget {
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 16),
+                        const Icon(Icons.play_arrow_rounded,
+                            color: Colors.white, size: 16),
                         const SizedBox(width: 6),
-                        Text(
-                          'Resume',
-                          style: GoogleFonts.nunito(
-                            color: Colors.white,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
+                        Text('Resume',
+                            style: GoogleFonts.nunito(
+                              color: Colors.white,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w800,
+                            )),
                       ],
                     ),
                   ),
@@ -834,9 +807,7 @@ class _ResumeHero extends StatelessWidget {
   }
 }
 
-// ----------------------------------------------------------------------------
-// Secondary continue row
-// ----------------------------------------------------------------------------
+// ── Continue row ──────────────────────────────────────────────────────────────
 class _ContinueRow extends StatelessWidget {
   final ModuleModel module;
   final VoidCallback onTap;
@@ -851,13 +822,13 @@ class _ContinueRow extends StatelessWidget {
         child: Row(
           children: [
             Container(
-              width: 44,
-              height: 44,
+              width: 44, height: 44,
               decoration: BoxDecoration(
                 color: AppColors.primary.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: const Icon(Icons.menu_book_rounded, color: AppColors.primary, size: 20),
+              child: const Icon(Icons.menu_book_rounded,
+                  color: AppColors.primary, size: 20),
             ),
             const SizedBox(width: 14),
             Expanded(
@@ -880,7 +851,8 @@ class _ContinueRow extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
-            const Icon(Icons.chevron_right_rounded, color: AppColors.textLight, size: 18),
+            const Icon(Icons.chevron_right_rounded,
+                color: AppColors.textLight, size: 18),
           ],
         ),
       ),
@@ -888,9 +860,7 @@ class _ContinueRow extends StatelessWidget {
   }
 }
 
-// ----------------------------------------------------------------------------
-// Upcoming event card
-// ----------------------------------------------------------------------------
+// ── Event card ────────────────────────────────────────────────────────────────
 class _EventCard extends StatelessWidget {
   final EventModel event;
   final VoidCallback onTap;
@@ -928,14 +898,12 @@ class _EventCard extends StatelessWidget {
                     children: [
                       Icon(Icons.calendar_today_rounded, color: color, size: 14),
                       const SizedBox(width: 6),
-                      Text(
-                        event.date,
-                        style: GoogleFonts.nunito(
-                          color: color,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
+                      Text(event.date,
+                          style: GoogleFonts.nunito(
+                            color: color,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w900,
+                          )),
                     ],
                   ),
                   const SizedBox(height: 8),
@@ -965,9 +933,7 @@ class _EventCard extends StatelessWidget {
   }
 }
 
-// ----------------------------------------------------------------------------
-// Pinned announcement card (carried over from the previous home screen)
-// ----------------------------------------------------------------------------
+// ── Announcement card ─────────────────────────────────────────────────────────
 class _AnnouncementCard extends StatelessWidget {
   final Map<String, dynamic> a;
   const _AnnouncementCard({required this.a});
@@ -979,10 +945,14 @@ class _AnnouncementCard extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: pinned ? AppColors.primary.withValues(alpha: 0.07) : AppColors.card,
+        color: pinned
+            ? AppColors.primary.withValues(alpha: 0.07)
+            : AppColors.card,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
-          color: pinned ? AppColors.primary.withValues(alpha: 0.25) : AppColors.border,
+          color: pinned
+              ? AppColors.primary.withValues(alpha: 0.25)
+              : AppColors.border,
         ),
       ),
       child: Row(
@@ -991,7 +961,8 @@ class _AnnouncementCard extends StatelessWidget {
           if (pinned)
             Padding(
               padding: const EdgeInsets.only(right: 8, top: 2),
-              child: Icon(Icons.push_pin_rounded, size: 14, color: AppColors.primary),
+              child: Icon(Icons.push_pin_rounded,
+                  size: 14, color: AppColors.primary),
             ),
           Expanded(
             child: Column(
@@ -1010,7 +981,8 @@ class _AnnouncementCard extends StatelessWidget {
                   a['body'] ?? a['content'] ?? '',
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: GoogleFonts.nunito(fontSize: 12, color: AppColors.textLight),
+                  style: GoogleFonts.nunito(
+                      fontSize: 12, color: AppColors.textLight),
                 ),
               ],
             ),
@@ -1021,9 +993,7 @@ class _AnnouncementCard extends StatelessWidget {
   }
 }
 
-// ----------------------------------------------------------------------------
-// Generic empty-state for a section
-// ----------------------------------------------------------------------------
+// ── Empty state ───────────────────────────────────────────────────────────────
 class _EmptyState extends StatelessWidget {
   final String message;
   final String actionLabel;
@@ -1042,7 +1012,8 @@ class _EmptyState extends StatelessWidget {
           Text(
             message,
             textAlign: TextAlign.center,
-            style: GoogleFonts.nunito(fontSize: 13, color: AppColors.textLight),
+            style: GoogleFonts.nunito(
+                fontSize: 13, color: AppColors.textLight),
           ),
           const SizedBox(height: 10),
           GestureDetector(
@@ -1062,11 +1033,9 @@ class _EmptyState extends StatelessWidget {
   }
 }
 
-// ----------------------------------------------------------------------------
-// Progress ring painter (white on translucent track)
-// ----------------------------------------------------------------------------
+// ── Progress ring painter ─────────────────────────────────────────────────────
 class _RingPainter extends CustomPainter {
-  final double pct; // 0..1
+  final double pct;
   _RingPainter(this.pct);
 
   @override
@@ -1088,8 +1057,8 @@ class _RingPainter extends CustomPainter {
       ..strokeCap = StrokeCap.round;
     canvas.drawArc(
       Rect.fromCircle(center: center, radius: radius),
-      -1.5708, // -90°
-      6.2832 * pct, // 2π * pct
+      -1.5708,
+      6.2832 * pct,
       false,
       arc,
     );
