@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'pdf_viewer_screen.dart';
+import 'file_viewer_screen.dart';
 import '../theme/app_theme.dart';
 import '../models/models.dart';
 import '../widgets/common_widgets.dart';
@@ -73,8 +74,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   _LibraryFilters _filters = const _LibraryFilters();
 
-  // Stats strip + "continue" rail — unpaginated, so they stay accurate
-  // regardless of scroll position or active filters.
   List<ModuleModel> _continueModules = [];
   int  _completedTotal  = 0;
   int  _inProgressTotal = 0;
@@ -198,8 +197,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
     }
   }
 
-  // Dedicated, unpaginated fetch for the header stats strip and the
-  // "pick up where you left off" rail.
   Future<void> _loadStats() async {
     final userId = _supabase.auth.currentUser?.id;
     if (userId == null) {
@@ -225,7 +222,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
           .select('id')
           .eq('user_id', userId);
 
-      // Full module rows are only needed for the handful shown in the rail.
       final continueModules = <ModuleModel>[];
       for (final r in (inProgressRows as List).take(5)) {
         final mid = r['module_id'].toString();
@@ -295,6 +291,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
     }
   }
 
+  // Routes to the correct viewer based on file type. PDFs use the
+  // existing in-app PDFView; every other type uses FileViewerScreen
+  // (image preview, or a file-info card for video/PPTX/DOCX/etc).
+  // Both viewers expose the same download icon button in their app bar.
   Future<void> _openFile(Map<String, dynamic> file) async {
     final url = file['file_url']?.toString();
     if (url == null || url.isEmpty) {
@@ -305,22 +305,37 @@ class _LibraryScreenState extends State<LibraryScreen> {
       return;
     }
 
+    final fileName = file['file_name']?.toString() ?? 'File';
+    final fileType = file['file_type']?.toString() ?? '';
+    final isPdf = fileType.toLowerCase().contains('pdf') ||
+        fileName.toLowerCase().endsWith('.pdf');
+
     await ActivityService.log(
       activityType:  'file_opened',
       referenceId:   file['id']?.toString(),
       referenceType: 'module_file',
-      metadata: {'file_name': file['file_name'], 'module_id': file['module_id']},
+      metadata: {'file_name': fileName, 'module_id': file['module_id']},
     );
 
     if (!mounted) return;
-    Navigator.push(context, MaterialPageRoute(
-    builder: (_) => PdfViewerScreen(
-        url: url,
-        title: file['file_name'] ?? 'Document',
-        onComplete: () => _updateProgress(_selectedModule!.id, 100),
-        )
-      )
-    );
+
+    if (isPdf) {
+      Navigator.push(context, MaterialPageRoute(
+        builder: (_) => PdfViewerScreen(
+          url: url,
+          title: fileName,
+          onComplete: () => _updateProgress(_selectedModule!.id, 100),
+        ),
+      ));
+    } else {
+      Navigator.push(context, MaterialPageRoute(
+        builder: (_) => FileViewerScreen(
+          url: url,
+          title: fileName,
+          fileType: fileType,
+        ),
+      ));
+    }
   }
 
   Future<void> _updateProgress(String moduleId, int pct) async {
@@ -406,7 +421,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
     return _buildLibrary();
   }
 
-  // ── Browse view ─────────────────────────────────────────
   Widget _buildLibrary() {
     return Column(
       children: [
@@ -481,7 +495,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
     );
   }
 
-  // ── Header: title, stats strip, search + filter trigger ──
   Widget _header() {
     return Container(
       decoration: const BoxDecoration(
@@ -611,7 +624,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
     );
   }
 
-  // ── "Pick up where you left off" rail ─────────────────────
   Widget _continueRail() {
     return Padding(
       padding: const EdgeInsets.only(top: 16),
@@ -640,8 +652,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
     );
   }
 
-  // ── Status segmented control (replaces the old Progress section of
-  //    the filter sheet) ─────────────────────────────────────
   Widget _statusBar() {
     const options = [
       ProgressFilter.all,
@@ -682,8 +692,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
     );
   }
 
-  // ── Category chips (secondary, replaces the old Category section of
-  //    the filter sheet) ─────────────────────────────────────
   Widget _categoryBar() {
     final cats = ['All', ..._categories];
     return Padding(
@@ -721,8 +729,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
     );
   }
 
-  // ── Active filters row (progress / category / author / date chips,
-  //    whichever are set, regardless of which control set them) ──────
   Widget _buildActiveFiltersRow() {
     return Container(
       color: Colors.white,
@@ -762,7 +768,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   _ActiveChipWithIcon(
                     icon: Icons.calendar_today_outlined,
                     label:
-                        '${_filters.dateFrom ?? '...'} → ${_filters.dateTo ?? '...'}',
+                        '${_filters.dateFrom ?? '...'} -> ${_filters.dateTo ?? '...'}',
                     onRemove: () => setState(() => _filters =
                         _filters.copyWith(dateFrom: null, dateTo: null)),
                   ),
@@ -810,7 +816,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
     );
   }
 
-  // ── Module Detail View (unchanged from the previous screen) ───────
   Widget _buildModuleDetail(ModuleModel module) {
     final progress = _progressMap[module.id] ?? 0;
     final raw      = _selectedRaw ?? {};
@@ -991,7 +996,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
                       ])
                     else
                       ..._moduleFiles.map(
-                          (f) => _FileTile(file: f, onTap: () => _openFile(f))),
+                          (f) => _FileTile(
+                                file:   f,
+                                onTap: () => _openFile(f),
+                              )),
                   ],
                 ),
               ),
@@ -1056,7 +1064,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 }
 
-// ── Rail section title ─────────────────────────────────────
 class _RailTitle extends StatelessWidget {
   final String text;
   const _RailTitle(this.text);
@@ -1066,7 +1073,6 @@ class _RailTitle extends StatelessWidget {
           fontSize: 14, fontWeight: FontWeight.w800, color: AppColors.textDark));
 }
 
-// ── Resume card (rail) ──────────────────────────────────────
 class _ResumeCard extends StatelessWidget {
   final ModuleModel module;
   final VoidCallback onTap;
@@ -1174,7 +1180,6 @@ class _ResumeCard extends StatelessWidget {
   }
 }
 
-// ── Full module card ────────────────────────────────────────
 class _ModuleCard extends StatelessWidget {
   final ModuleModel module;
   final VoidCallback onOpen;
@@ -1335,7 +1340,6 @@ class _ModuleCard extends StatelessWidget {
   }
 }
 
-// ── Metadata chip ──────────────────────────────────────────
 class _MetaChip extends StatelessWidget {
   final IconData icon;
   final String label;
@@ -1360,7 +1364,6 @@ class _MetaChip extends StatelessWidget {
   }
 }
 
-// ── Active filter chip (text only) ────────────────────────
 class _ActiveChip extends StatelessWidget {
   final String label;
   final VoidCallback onRemove;
@@ -1391,7 +1394,6 @@ class _ActiveChip extends StatelessWidget {
   }
 }
 
-// ── Active filter chip (icon + text) ──────────────────────
 class _ActiveChipWithIcon extends StatelessWidget {
   final IconData icon;
   final String label;
@@ -1429,8 +1431,6 @@ class _ActiveChipWithIcon extends StatelessWidget {
   }
 }
 
-// ── Filter bottom sheet — Author + Date Range only now; Progress and
-//    Category are set inline on the browse screen (status pills / chips) ──
 class _FilterSheet extends StatefulWidget {
   final List<String> authors;
   final _LibraryFilters currentFilters;
@@ -1506,7 +1506,6 @@ class _FilterSheetState extends State<_FilterSheet> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Author
                   if (widget.authors.isNotEmpty) ...[
                     Text('Author',
                         style: GoogleFonts.nunito(
@@ -1514,25 +1513,32 @@ class _FilterSheetState extends State<_FilterSheet> {
                             fontWeight: FontWeight.w800,
                             color: AppColors.textMid)),
                     const SizedBox(height: 10),
-                    Wrap(spacing: 8, runSpacing: 8, children: [
-                      _SheetChip(
-                        label: 'All',
-                        selected: _local.author == null,
-                        onTap: () => setState(
-                            () => _local = _local.copyWith(author: null)),
-                      ),
-                      ...widget.authors.map((a) => _SheetChip(
-                            label: a,
-                            icon: Icons.person_outline,
-                            selected: _local.author == a,
+                    LayoutBuilder(
+                      builder: (context, constraints) => Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          _SheetChip(
+                            label: 'All',
+                            selected: _local.author == null,
+                            maxWidth: constraints.maxWidth,
                             onTap: () => setState(
-                                () => _local = _local.copyWith(author: a)),
-                          )),
-                    ]),
+                                () => _local = _local.copyWith(author: null)),
+                          ),
+                          ...widget.authors.map((a) => _SheetChip(
+                                label: a,
+                                icon: Icons.person_outline,
+                                selected: _local.author == a,
+                                maxWidth: constraints.maxWidth,
+                                onTap: () => setState(
+                                    () => _local = _local.copyWith(author: a)),
+                              )),
+                        ],
+                      ),
+                    ),
                     const SizedBox(height: 20),
                   ],
 
-                  // Date Range
                   Text('Publication Date Range',
                       style: GoogleFonts.nunito(
                           fontSize: 13,
@@ -1736,63 +1742,94 @@ class _FilterSheetState extends State<_FilterSheet> {
   }
 }
 
-// ── Sheet chip ─────────────────────────────────────────────
 class _SheetChip extends StatelessWidget {
   final String label;
   final IconData? icon;
   final bool selected;
   final VoidCallback onTap;
+  final double? maxWidth;
   const _SheetChip({
     required this.label,
     required this.selected,
     required this.onTap,
     this.icon,
+    this.maxWidth,
   });
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        padding:
-            const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        decoration: BoxDecoration(
-          color: selected
-              ? AppColors.primary.withValues(alpha: 0.1)
-              : AppColors.background,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-              color: selected ? AppColors.primary : AppColors.border,
-              width: selected ? 1.5 : 1),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: maxWidth != null
+              ? (maxWidth! - 16).clamp(120, 260)
+              : 240,
         ),
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          if (icon != null) ...[
-            Icon(icon,
-                size: 13,
-                color:
-                    selected ? AppColors.primary : AppColors.textMid),
-            const SizedBox(width: 5),
-          ],
-          Text(label,
-              style: GoogleFonts.nunito(
-                  fontSize: 13,
-                  fontWeight:
-                      selected ? FontWeight.w700 : FontWeight.w500,
-                  color: selected
-                      ? AppColors.primary
-                      : AppColors.textMid)),
-        ]),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding:
+              const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            color: selected
+                ? AppColors.primary.withValues(alpha: 0.1)
+                : AppColors.background,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+                color: selected ? AppColors.primary : AppColors.border,
+                width: selected ? 1.5 : 1),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (icon != null) ...[
+                Padding(
+                  padding: const EdgeInsets.only(top: 1.5),
+                  child: Icon(icon,
+                      size: 13,
+                      color: selected
+                          ? AppColors.primary
+                          : AppColors.textMid),
+                ),
+                const SizedBox(width: 5),
+              ],
+              Flexible(
+                child: Text(
+                  label,
+                  softWrap: true,
+                  style: GoogleFonts.nunito(
+                      fontSize: 13,
+                      fontWeight:
+                          selected ? FontWeight.w700 : FontWeight.w500,
+                      color: selected
+                          ? AppColors.primary
+                          : AppColors.textMid),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
 }
 
-// ── File Tile ──────────────────────────────────────────────
+// File row — purely navigational. Tapping opens the appropriate
+// viewer (PdfViewerScreen for PDFs, FileViewerScreen for everything
+// else). Downloading is a separate, explicit action available as an
+// icon button inside whichever viewer opens — not triggered by tapping
+// this row, and no longer tracked/cached here.
 class _FileTile extends StatelessWidget {
   final Map<String, dynamic> file;
   final VoidCallback onTap;
   const _FileTile({required this.file, required this.onTap});
+
+  bool get _isPdf {
+    final type = (file['file_type'] ?? '').toString().toLowerCase();
+    final name = (file['file_name'] ?? '').toString().toLowerCase();
+    return type.contains('pdf') || name.endsWith('.pdf');
+  }
 
   IconData get _icon {
     final type = (file['file_type'] ?? '').toString().toLowerCase();
@@ -1889,15 +1926,20 @@ class _FileTile extends StatelessWidget {
                 color: AppColors.primary.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: Row(children: [
-                const Icon(Icons.open_in_new,
-                    size: 14, color: AppColors.primary),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(
+                  _isPdf ? Icons.picture_as_pdf_outlined : Icons.visibility_outlined,
+                  size: 14,
+                  color: AppColors.primary,
+                ),
                 const SizedBox(width: 4),
-                Text('Open',
-                    style: GoogleFonts.nunito(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.primary)),
+                Text(
+                  'View',
+                  style: GoogleFonts.nunito(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.primary),
+                ),
               ]),
             ),
           ],
@@ -1907,7 +1949,6 @@ class _FileTile extends StatelessWidget {
   }
 }
 
-// ── Expandable description ─────────────────────────────────
 class _ExpandableDescription extends StatefulWidget {
   final String description;
   const _ExpandableDescription({required this.description});

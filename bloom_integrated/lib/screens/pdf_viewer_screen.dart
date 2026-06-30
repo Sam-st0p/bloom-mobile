@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import '../theme/app_theme.dart';
+import '../services/file_download_service.dart';
 
 class PdfViewerScreen extends StatefulWidget {
   final String url;
@@ -28,6 +29,9 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   String? _error;
   int _totalPages = 0;
   int _currentPage = 0;
+
+  bool   _saving       = false;
+  double _saveProgress = 0.0;
 
   @override
   void initState() {
@@ -62,6 +66,51 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
     }
   }
 
+  // Downloads straight to the device's public Downloads folder —
+  // no share-sheet picker. The file appears in Downloads / Files app
+  // immediately, with the OS's own download notification.
+  Future<void> _handleDownload() async {
+    if (_saving) return;
+    setState(() { _saving = true; _saveProgress = 0.0; });
+
+    try {
+      final fileName = widget.title.toLowerCase().endsWith('.pdf')
+          ? widget.title
+          : '${widget.title}.pdf';
+
+      await FileDownloadService.downloadToDownloadsFolder(
+        url:      widget.url,
+        fileName: fileName,
+        onProgress: (p) {
+          if (mounted) setState(() => _saveProgress = p);
+        },
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Saved to Downloads.',
+              style: GoogleFonts.nunito(color: Colors.white)),
+          backgroundColor: AppColors.primary,
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
+    } catch (e, st) {
+      debugPrint('PDF download failed: $e');
+      debugPrintStack(stackTrace: st);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Download failed: $e',
+              style: GoogleFonts.nunito(color: Colors.white, fontSize: 12)),
+          backgroundColor: AppColors.danger,
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 6),
+        ));
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -84,15 +133,32 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
         actions: [
           if (!_loading && _error == null && _totalPages > 0)
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-              child: Text(
-                '${_currentPage + 1} / $_totalPages',
-                style: GoogleFonts.nunito(
-                  color: Colors.white70,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 14),
+              child: Center(
+                child: Text(
+                  '${_currentPage + 1} / $_totalPages',
+                  style: GoogleFonts.nunito(
+                    color: Colors.white70,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
+            ),
+          if (!_loading && _error == null)
+            IconButton(
+              tooltip: 'Download to Downloads',
+              onPressed: _saving ? null : _handleDownload,
+              icon: _saving
+                  ? SizedBox(
+                      width: 20, height: 20,
+                      child: CircularProgressIndicator(
+                        value: _saveProgress > 0 ? _saveProgress : null,
+                        color: Colors.white,
+                        strokeWidth: 2,
+                      ),
+                    )
+                  : const Icon(Icons.download_outlined, color: Colors.white),
             ),
         ],
       ),

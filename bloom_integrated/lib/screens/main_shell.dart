@@ -111,6 +111,14 @@ class _MainShellState extends State<MainShell> {
             _currentIndex     = 2;
           });
         },
+        onOpenCalendar: () {
+          // Forum tile — jump straight to the Calendar sub-tab of Events
+          // until a real Forum tab exists.
+          setState(() {
+            _eventsInitialTab = 1;
+            _currentIndex     = 2;
+          });
+        },
       ),
       const LibraryScreen(),
       EventsScreen(initialTab: _eventsInitialTab),

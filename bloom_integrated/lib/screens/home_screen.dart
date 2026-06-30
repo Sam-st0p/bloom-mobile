@@ -22,6 +22,11 @@ class HomeScreen extends StatefulWidget {
   final int unreadCount;
   final void Function(LiveSeminar seminar)? onJoinLive;
 
+  /// Opens the Calendar sub-tab of Events directly.
+  /// Used by the "Forum" quick-action tile, which is repurposed to jump
+  /// straight to the calendar view until a real Forum tab exists.
+  final VoidCallback? onOpenCalendar;
+
   /// Role pre-resolved by AuthGate and passed down through MainShell.
   /// When non-empty, HomeScreen uses this directly instead of reading
   /// from the DB — eliminating the race condition where Google users
@@ -35,6 +40,7 @@ class HomeScreen extends StatefulWidget {
     required this.onOpenNotifications,
     required this.unreadCount,
     this.onJoinLive,
+    this.onOpenCalendar,
     this.resolvedRole = '',
   });
 
@@ -176,7 +182,7 @@ class _HomeScreenState extends State<HomeScreen> {
           .limit(1);
 
       if ((rows as List).isEmpty) return null;
-      final row = rows.first as Map<String, dynamic>;
+      final row = rows.first;
 
       int attendees = 0;
       try {
@@ -519,13 +525,24 @@ class _HomeScreenState extends State<HomeScreen> {
       (Icons.menu_book_rounded,          'Modules',      AppColors.primary, 1),
       (Icons.school_rounded,             'Seminars',     AppColors.purple,  2),
       (Icons.workspace_premium_rounded,  'Certificates', AppColors.accent,  3),
-      (Icons.forum_rounded,              'Forum',        AppColors.info,    0),
+      (Icons.calendar_month_rounded,     'Calendar',     AppColors.info,    -1),
     ];
     return Row(
       children: items.map((it) {
         return Expanded(
           child: GestureDetector(
-            onTap: () => widget.onSwitchTab(it.$4),
+            onTap: () {
+              if (it.$4 == -1) {
+                // Calendar tile — opens the Calendar sub-tab of Events directly.
+                if (widget.onOpenCalendar != null) {
+                  widget.onOpenCalendar!();
+                } else {
+                  widget.onSwitchTab(2); // fallback: Events tab
+                }
+              } else {
+                widget.onSwitchTab(it.$4);
+              }
+            },
             behavior: HitTestBehavior.opaque,
             child: Column(
               children: [

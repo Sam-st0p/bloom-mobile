@@ -219,7 +219,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _lastNameCtrl.text.trim()  != savedLast  ||
         _studentIdCtrl.text.trim() !=
             (_profileData?['student_id'] as String? ?? '') ||
-        _selectedRole   != (_profileData?['role']       as String?) ||
         _selectedDept   != (_profileData?['department'] as String?) ||
         _selectedCourse != (_profileData?['course']     as String?);
   }
@@ -356,7 +355,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             (profile['full_name'] as String).trim().isEmpty)) {
           final meta = _supabase.auth.currentUser?.userMetadata;
           final metaName = meta?['full_name'] as String?;
-          if (metaName != null && metaName.isNotEmpty && userId != null) {
+          if (metaName != null && metaName.isNotEmpty) {
             await _supabase.from('profiles')
                 .update({'full_name': metaName})
                 .eq('id', userId);
@@ -463,62 +462,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
       if (mounted) _showError('Upload failed. Please try again.');
     } finally {
       if (mounted) setState(() => _uploadingAvatar = false);
-    }
-  }
-
-  // ── Role change ────────────────────────────────────────────────────────────
-  Future<void> _onRoleTap(String newRole) async {
-    if (newRole == _selectedRole) return;
-
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16)),
-        title: Text('Change Role?',
-            style: GoogleFonts.poppins(
-                fontWeight: FontWeight.w700, color: AppColors.textDark)),
-        content: Text(
-          'Changing to "${newRole[0].toUpperCase()}${newRole.substring(1)}" '
-          'will update your profile fields. Continue?',
-          style: GoogleFonts.poppins(
-              fontSize: 13, color: AppColors.textMid, height: 1.5)),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: Text('Cancel',
-                style: GoogleFonts.poppins(color: AppColors.textMid))),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primaryDark,
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10)),
-              elevation: 0,
-            ),
-            child: Text('Change Role',
-                style: GoogleFonts.poppins(
-                    color: Colors.white, fontWeight: FontWeight.w600))),
-        ],
-      ),
-    );
-
-    if (confirmed == true && mounted) {
-      setState(() {
-        _selectedRole   = newRole;
-        _deptError      = null;
-        _courseError    = null;
-        _studentIdError = null;
-        if (newRole != 'student') {
-          _selectedCourse = null;
-          _selectedYear   = '1st Year';
-          _studentIdCtrl.clear();
-        }
-        if (newRole != 'teacher' && newRole != 'faculty' &&
-            newRole != 'student') {
-          _selectedDept = null;
-        }
-      });
     }
   }
 
@@ -687,9 +630,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
       final rawIndex  = kYearLevels.indexOf(_selectedYear);
       final yearIndex = rawIndex >= 0 ? rawIndex + 1 : null;
 
+      // NOTE: 'role' is intentionally NOT included in this payload.
+      // Role is assigned by GADRC (via the CvSU masterlist at signup)
+      // and is no longer user-editable from this screen.
       final Map<String, dynamic> payload = {
         'full_name':  fullName,
-        'role':       _selectedRole,
         'updated_at': DateTime.now().toUtc().toIso8601String(),
       };
 
@@ -1526,51 +1471,42 @@ class _ProfileScreenState extends State<ProfileScreen> {
               )),
               const SizedBox(height: 12),
 
-              // ── Role ────────────────────────────────────────────────
+              // ── Role (read-only) ───────────────────────────────────
               AppCard(child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   _sectionLabel('Role'),
                   const SizedBox(height: 4),
-                  Text('Tap to change — affects required fields.',
-                      style: GoogleFonts.poppins(
-                          fontSize: 11, color: AppColors.textLight)),
+                  Text(
+                    'Your role is assigned by GADRC and cannot be changed here.',
+                    style: GoogleFonts.poppins(
+                        fontSize: 11, color: AppColors.textLight),
+                  ),
                   const SizedBox(height: 12),
-                  Wrap(
-                    spacing: 8, runSpacing: 8,
-                    children: [
-                      'student','teacher','faculty','speaker','guest',
-                    ].map((r) {
-                      final sel = _selectedRole == r;
-                      return GestureDetector(
-                        onTap: () => _onRoleTap(r),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 9),
-                          decoration: BoxDecoration(
-                            color: sel
-                                ? AppColors.primaryDark
-                                : AppColors.background,
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(
-                              color: sel
-                                  ? AppColors.primaryDark
-                                  : AppColors.border,
-                              width: 1.5,
-                            ),
-                          ),
-                          child: Text(
-                            r[0].toUpperCase() + r.substring(1),
-                            style: GoogleFonts.poppins(
-                                fontWeight: FontWeight.w600,
-                                fontSize: 13,
-                                color: sel
-                                    ? Colors.white
-                                    : AppColors.textMid),
-                          ),
-                        ),
-                      );
-                    }).toList(),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: AppColors.background,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: AppColors.border),
+                    ),
+                    child: Row(children: [
+                      const Icon(Icons.verified_user_outlined,
+                          color: AppColors.textMid, size: 18),
+                      const SizedBox(width: 10),
+                      Text(
+                        _selectedRole == null || _selectedRole!.isEmpty
+                            ? 'Not set'
+                            : _selectedRole![0].toUpperCase() +
+                                _selectedRole!.substring(1),
+                        style: GoogleFonts.poppins(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 14,
+                            color: AppColors.textDark),
+                      ),
+                    ]),
                   ),
                   if (_isStudent) ...[
                     const SizedBox(height: 10),
@@ -1998,4 +1934,4 @@ class ProfileBadgePreview extends StatelessWidget {
       ),
     );
   }
-}
+} 

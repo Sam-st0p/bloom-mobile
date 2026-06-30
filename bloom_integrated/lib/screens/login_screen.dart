@@ -88,9 +88,27 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   // ── Forgot password ───────────────────────────────────────────────────────
+  //
+  // FIX: previously this captured the outer (LoginScreen) BuildContext
+  // inside the bottom sheet's button callback and used it AFTER calling
+  // Navigator.pop(ctx) to close the sheet. Once the sheet's element tree
+  // starts unmounting, using a context whose dependents are still being
+  // torn down can throw "_dependents.isEmpty is not true" inside Flutter's
+  // InheritedWidget bookkeeping. The fix is to:
+  //   1. Capture the ScaffoldMessengerState reference up-front, before any
+  //      pop/navigation happens, using the STATE object (not context).
+  //   2. Never call Navigator.of(context)/ScaffoldMessenger.of(context)
+  //      using a context after the widget that owns it has been popped.
+  //   3. Show the snackbar via the captured messenger reference only,
+  //      scheduled after the pop completes (post-frame), so there is no
+  //      possibility of touching a disposing context synchronously.
 
   void _showForgotPassword() {
-    // Pre-fill with whatever the user already typed in the email field.
+    // Captured ONCE, safely, before the sheet is shown — this State's own
+    // ScaffoldMessenger never gets disposed mid-callback the way a context
+    // grabbed inside a transient builder closure can.
+    final rootMessenger = ScaffoldMessenger.of(context);
+
     final resetCtrl = TextEditingController(
         text: _isCvsuEmail ? _emailCtrl.text.trim() : '');
     final resetFormKey = GlobalKey<FormState>();
@@ -100,10 +118,10 @@ class _LoginScreenState extends State<LoginScreen> {
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSheetState) => Padding(
+      builder: (sheetCtx) => StatefulBuilder(
+        builder: (sheetCtx, setSheetState) => Padding(
           padding: EdgeInsets.only(
-              bottom: MediaQuery.of(ctx).viewInsets.bottom),
+              bottom: MediaQuery.of(sheetCtx).viewInsets.bottom),
           child: Container(
             decoration: const BoxDecoration(
               color: Colors.white,
@@ -204,18 +222,33 @@ class _LoginScreenState extends State<LoginScreen> {
                           return;
                         }
                         setSheetState(() => sending = true);
+
+                        final emailToSend = resetCtrl.text.trim();
+
                         try {
                           await Supabase.instance.client.auth
                               .resetPasswordForEmail(
-                            resetCtrl.text.trim().toLowerCase(),
+                            emailToSend.toLowerCase(),
                             redirectTo: 'io.supabase.bloom://reset-callback',
                           );
-                          if (ctx.mounted) {
-                            Navigator.pop(ctx);
-                            ScaffoldMessenger.of(context).showSnackBar(
+
+                          // Close the sheet FIRST. Do not touch sheetCtx or
+                          // the outer context again after this point inside
+                          // this synchronous block — schedule any further
+                          // UI feedback via the messenger captured earlier.
+                          if (sheetCtx.mounted) {
+                            Navigator.pop(sheetCtx);
+                          }
+
+                          // Defer to the next frame so we're guaranteed the
+                          // sheet's element tree has finished unmounting
+                          // before we touch the (already-safe) root
+                          // ScaffoldMessenger reference.
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            rootMessenger.showSnackBar(
                               SnackBar(
                                 content: Text(
-                                  'Reset link sent to ${resetCtrl.text.trim()}. '
+                                  'Reset link sent to $emailToSend. '
                                   'Check your inbox.',
                                   style: GoogleFonts.nunito(color: Colors.white),
                                 ),
@@ -225,11 +258,13 @@ class _LoginScreenState extends State<LoginScreen> {
                                     borderRadius: BorderRadius.circular(10)),
                               ),
                             );
-                          }
+                          });
                         } catch (e) {
-                          if (ctx.mounted) {
+                          if (sheetCtx.mounted) {
                             setSheetState(() => sending = false);
-                            ScaffoldMessenger.of(context).showSnackBar(
+                          }
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            rootMessenger.showSnackBar(
                               SnackBar(
                                 content: Text(
                                   'Failed to send reset email. Please try again.',
@@ -241,7 +276,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                     borderRadius: BorderRadius.circular(10)),
                               ),
                             );
-                          }
+                          });
                         }
                       },
                       style: ElevatedButton.styleFrom(
