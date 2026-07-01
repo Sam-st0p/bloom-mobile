@@ -45,6 +45,11 @@ class _LoginScreenState extends State<LoginScreen> {
   final _emailCtrl   = TextEditingController();
   final _passCtrl    = TextEditingController();
 
+  // Owned by this State (not created/disposed per sheet-open) so it can
+  // never be torn down while the "forgot password" sheet is still
+  // animating off-screen. See _showForgotPassword() for why that matters.
+  final _resetCtrl = TextEditingController();
+
   bool    _obscurePass = true;
   bool    _loading     = false;
   String? _error;
@@ -53,6 +58,7 @@ class _LoginScreenState extends State<LoginScreen> {
   void dispose() {
     _emailCtrl.dispose();
     _passCtrl.dispose();
+    _resetCtrl.dispose();
     super.dispose();
   }
 
@@ -89,28 +95,35 @@ class _LoginScreenState extends State<LoginScreen> {
 
   // ── Forgot password ───────────────────────────────────────────────────────
   //
-  // FIX: previously this captured the outer (LoginScreen) BuildContext
-  // inside the bottom sheet's button callback and used it AFTER calling
-  // Navigator.pop(ctx) to close the sheet. Once the sheet's element tree
-  // starts unmounting, using a context whose dependents are still being
-  // torn down can throw "_dependents.isEmpty is not true" inside Flutter's
-  // InheritedWidget bookkeeping. The fix is to:
-  //   1. Capture the ScaffoldMessengerState reference up-front, before any
-  //      pop/navigation happens, using the STATE object (not context).
-  //   2. Never call Navigator.of(context)/ScaffoldMessenger.of(context)
-  //      using a context after the widget that owns it has been popped.
-  //   3. Show the snackbar via the captured messenger reference only,
-  //      scheduled after the pop completes (post-frame), so there is no
-  //      possibility of touching a disposing context synchronously.
+  // FIX #1 (context-after-pop): previously this captured the outer
+  // (LoginScreen) BuildContext inside the bottom sheet's button callback and
+  // used it AFTER calling Navigator.pop(ctx). Once the sheet's element tree
+  // starts unmounting, using a context whose dependents are still being torn
+  // down can throw "_dependents.isEmpty is not true" inside Flutter's
+  // InheritedWidget bookkeeping. Fixed by capturing the
+  // ScaffoldMessengerState reference up-front (the STATE object, not
+  // context) and only ever notifying via that captured reference, scheduled
+  // with a post-frame callback so we never touch a disposing context
+  // synchronously.
+  //
+  // FIX #2 (controller-disposed-mid-animation): previously a fresh
+  // TextEditingController was created every time this method ran and
+  // disposed via showModalBottomSheet(...).whenComplete(). That future
+  // completes as soon as the route is POPPED — which happens the instant a
+  // swipe-down drag crosses the dismiss threshold, not after the sheet's
+  // slide-down transition finishes painting. The sheet (and its
+  // TextFormField) is still on screen and rebuilding for a few more frames
+  // after that, so it ended up using a controller that had already been
+  // disposed → "A TextEditingController was used after being disposed."
+  // Fixed by hoisting the controller (_resetCtrl) to State-level so it is
+  // only ever disposed once, in this State's dispose(), never mid-animation.
 
   void _showForgotPassword() {
-    // Captured ONCE, safely, before the sheet is shown — this State's own
-    // ScaffoldMessenger never gets disposed mid-callback the way a context
-    // grabbed inside a transient builder closure can.
     final rootMessenger = ScaffoldMessenger.of(context);
 
-    final resetCtrl = TextEditingController(
-        text: _isCvsuEmail ? _emailCtrl.text.trim() : '');
+    // Reset the value each time the sheet opens instead of creating a new
+    // controller — see FIX #2 above.
+    _resetCtrl.text = _isCvsuEmail ? _emailCtrl.text.trim() : '';
     final resetFormKey = GlobalKey<FormState>();
     bool sending = false;
 
@@ -170,7 +183,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   const SizedBox(height: 20),
 
                   TextFormField(
-                    controller:   resetCtrl,
+                    controller:   _resetCtrl,
                     keyboardType: TextInputType.emailAddress,
                     autocorrect:  false,
                     style: GoogleFonts.nunito(
@@ -223,7 +236,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         }
                         setSheetState(() => sending = true);
 
-                        final emailToSend = resetCtrl.text.trim();
+                        final emailToSend = _resetCtrl.text.trim();
 
                         try {
                           await Supabase.instance.client.auth
@@ -305,7 +318,9 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
         ),
       ),
-    ).whenComplete(() => resetCtrl.dispose());
+      // NOTE: no .whenComplete(() => _resetCtrl.dispose()) here anymore —
+      // _resetCtrl is owned by the State and disposed once in dispose().
+    );
   }
 
   // ── Google sign-in → guest role ───────────────────────────────────────────
