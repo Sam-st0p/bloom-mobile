@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -37,6 +38,11 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
   // Text controllers for short answer questions — persists text across navigation
   final Map<String, TextEditingController> _textControllers = {};
 
+  // Timer
+  Timer?  _timer;
+  int     _secondsLeft = 0;
+  bool    _timerStarted = false;
+
   // Results
   double _score = 0;
   double _maxScore = 0;
@@ -51,6 +57,7 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
 
   @override
   void dispose() {
+    _timer?.cancel();
     for (final c in _textControllers.values) { c.dispose(); }
     super.dispose();
   }
@@ -99,6 +106,10 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
           _previousAttempts = prevAttempts;
           _loading = false;
         });
+        final timeLimitMins = assessment['time_limit'] as int?;
+        if (timeLimitMins != null && timeLimitMins > 0) {
+          _startTimer(timeLimitMins * 60);
+        }
       }
     } catch (e) {
       if (mounted) setState(() => _loading = false);
@@ -122,7 +133,38 @@ class _AssessmentScreenState extends State<AssessmentScreen> {
     }).toList();
   }
 
+  void _startTimer(int totalSeconds) {
+    _timer?.cancel();
+    setState(() { _secondsLeft = totalSeconds; _timerStarted = true; });
+    _timer = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (!mounted) { t.cancel(); return; }
+      if (_secondsLeft <= 0) {
+        t.cancel();
+        if (!_done && !_submitting) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Time is up! Submitting your assessment…',
+                  style: TextStyle(color: Colors.white)),
+              backgroundColor: Color(0xFFDC2626),
+              duration: Duration(seconds: 3),
+            ),
+          );
+          _submitAssessment();
+        }
+      } else {
+        setState(() => _secondsLeft--);
+      }
+    });
+  }
+
+  String _formatTime(int seconds) {
+    final m = (seconds ~/ 60).toString().padLeft(2, '0');
+    final s = (seconds % 60).toString().padLeft(2, '0');
+    return '$m:$s';
+  }
+
   Future<void> _submitAssessment() async {
+    _timer?.cancel();
     setState(() => _submitting = true);
     try {
       final userId = _supabase.auth.currentUser?.id;
@@ -390,6 +432,23 @@ final isCorrect = selected['is_correct'] == true;
                       fontWeight: FontWeight.w800,
                       color: AppColors.primary)),
             ),
+            if (_timerStarted) ...[const SizedBox(width: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: (_secondsLeft <= 60 ? const Color(0xFFDC2626) : AppColors.primary).withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(Icons.timer_outlined, size: 13,
+                      color: _secondsLeft <= 60 ? const Color(0xFFDC2626) : AppColors.primary),
+                  const SizedBox(width: 4),
+                  Text(_formatTime(_secondsLeft),
+                      style: GoogleFonts.nunito(fontSize: 12, fontWeight: FontWeight.w800,
+                          color: _secondsLeft <= 60 ? const Color(0xFFDC2626) : AppColors.primary)),
+                ]),
+              ),
+            ],
         ],
       ),
     );

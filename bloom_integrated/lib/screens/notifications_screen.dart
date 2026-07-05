@@ -19,6 +19,10 @@ IconData _notifIcon(String? type) {
     case 'seminar_reminder':     return Icons.alarm_outlined;
     case 'event_reminder':       return Icons.event_outlined;
     case 'new_event':            return Icons.event_outlined;
+    case 'account_deactivated':  return Icons.block_outlined;
+    case 'account_reactivated':  return Icons.check_circle_outline;
+    case 'role_changed':         return Icons.manage_accounts_outlined;
+    case 'registration_removed': return Icons.person_remove_outlined;
     default:                     return Icons.notifications_outlined;
   }
 }
@@ -36,6 +40,10 @@ Color _notifColor(String? type) {
     case 'seminar_reminder':     return const Color(0xFFDC2626);
     case 'event_reminder':       return const Color(0xFFDC2626);
     case 'new_event':            return const Color(0xFF0891B2);
+    case 'account_deactivated':  return const Color(0xFFDC2626);
+    case 'account_reactivated':  return const Color(0xFF16A34A);
+    case 'role_changed':         return const Color(0xFF7C3AED);
+    case 'registration_removed': return const Color(0xFFF59E0B);
     default:                     return AppColors.textLight;
   }
 }
@@ -53,6 +61,10 @@ String _notifLabel(String? type) {
     case 'seminar_reminder':     return 'Reminder';
     case 'event_reminder':       return 'Reminder';
     case 'new_event':            return 'New Event';
+    case 'account_deactivated':  return 'Account';
+    case 'account_reactivated':  return 'Account';
+    case 'role_changed':         return 'Role Update';
+    case 'registration_removed': return 'Registration';
     default:                     return 'Notification';
   }
 }
@@ -140,6 +152,11 @@ class _NotificationsScreenState extends State<NotificationsScreen>
         Navigator.pop(context, NavResult.achievements);
         break;
 
+      // ── Account / role changes → inline detail sheet ──────────
+      case 'account_deactivated':
+      case 'account_reactivated':
+      case 'role_changed':
+      case 'registration_removed':
       // ── Announcements + unknown → inline detail sheet ───────────
       case 'announcement':
       default:
@@ -406,7 +423,27 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                                   final type   = n['type'] as String?;
                                   final color  = _notifColor(type);
 
-                                  return GestureDetector(
+                                  return Dismissible(
+                                    key: Key(n['id'].toString()),
+                                    direction: DismissDirection.endToStart,
+                                    onDismissed: (_) => provider.deleteNotification(n['id'].toString()),
+                                    background: Container(
+                                      alignment: Alignment.centerRight,
+                                      padding: const EdgeInsets.only(right: 20),
+                                      decoration: BoxDecoration(
+                                        color: AppColors.danger,
+                                        borderRadius: BorderRadius.circular(14),
+                                      ),
+                                      child: const Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(Icons.delete_outline, color: Colors.white, size: 22),
+                                          SizedBox(height: 4),
+                                          Text('Delete', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700)),
+                                        ],
+                                      ),
+                                    ),
+                                    child: GestureDetector(
                                     onTap: () =>
                                         _handleTap(provider, n),
                                     child: AnimatedContainer(
@@ -559,6 +596,7 @@ class _NotificationsScreenState extends State<NotificationsScreen>
                                               color: AppColors.textLight),
                                         ],
                                       ),
+                                    ),
                                     ),
                                   );
                                 },

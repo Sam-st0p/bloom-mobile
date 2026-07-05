@@ -324,7 +324,8 @@ class _SeminarsTabState extends State<_SeminarsTab> {
   bool _hasMore     = true;
   int  _page        = 0;
   String _filter    = 'All';
-  final Set<String> _registering = {};
+  final Set<String> _registering  = {};
+  final Set<String> _evaluatedIds = {}; // seminar IDs already evaluated by user
   static const int  _pageSize    = 10;
   static const List<String> _filters = ['All', 'Live', 'Upcoming', 'Registered', 'Past'];
   final _scrollController = ScrollController();
@@ -397,6 +398,15 @@ class _SeminarsTabState extends State<_SeminarsTab> {
       final sems = await _db.from('seminars').select('*').eq('is_public', true)
           .order('scheduled_start').range(0, _pageSize - 1);
       await widget.regState.load();
+      // Load which seminars the user has already evaluated
+      final userId = _db.auth.currentUser?.id;
+      if (userId != null) {
+        final evals = await _db.from('seminar_evaluations')
+            .select('seminar_id').eq('user_id', userId).not('submitted_at', 'is', null);
+        final ids = Set<String>.from(
+            (evals as List).map((e) => e['seminar_id'].toString()));
+        if (mounted) setState(() => _evaluatedIds.addAll(ids));
+      }
       final list = List<Map<String, dynamic>>.from(sems);
       if (mounted) {
         setState(() { _seminars = list; _hasMore = list.length == _pageSize; _loading = false; });
@@ -614,7 +624,9 @@ class _SeminarsTabState extends State<_SeminarsTab> {
           final hasEnded = _seminarHasEnded(sem);
 
           String btnLabel;
+          final hasEvaluated = _evaluatedIds.contains(sem['id'].toString());
           if (isBusy)                              btnLabel = isReg ? 'Cancelling…' : 'Registering…';
+          else if (status == 'completed' && isReg && hasEvaluated) btnLabel = 'Evaluated ✓';
           else if (status == 'completed')          btnLabel = isReg ? 'Evaluate' : 'Not Registered';
           else if (status == 'cancelled')          btnLabel = 'Cancelled';
           else if (isFull)                         btnLabel = 'Fully Booked';
@@ -623,11 +635,24 @@ class _SeminarsTabState extends State<_SeminarsTab> {
           else                                     btnLabel = 'Register';
 
           VoidCallback? btnAction;
-          if (!isBusy && !isFull) {
+          if (!isBusy && !isFull && !hasEvaluated) {
             if (status == 'completed' && isReg) {
               btnAction = () => Navigator.push(ctx, MaterialPageRoute(builder: (_) =>
                   SeminarDetailScreen(seminar: sem, regState: widget.regState,
-                      onRegister: () => _register(sem)))).then((_) => _load());
+                      onRegister: () => _register(sem)))).then((_) {
+                // Refresh evaluated IDs in case user just submitted an evaluation
+                final userId = _db.auth.currentUser?.id;
+                if (userId != null) {
+                  _db.from('seminar_evaluations').select('seminar_id')
+                      .eq('user_id', userId).not('submitted_at', 'is', null)
+                      .then((evals) {
+                        if (mounted) setState(() {
+                          _evaluatedIds.addAll((evals as List).map((e) => e['seminar_id'].toString()));
+                        });
+                      });
+                }
+                _load();
+              });
             } else if (status != 'cancelled' && status != 'completed' && (isReg || isOpen)) {
               btnAction = () => _register(sem);
             }

@@ -113,6 +113,20 @@ class NotificationProvider extends ChangeNotifier {
     }
   }
 
+  Future<void> deleteNotification(String id) async {
+    // Optimistic remove
+    final prev = List<Map<String, dynamic>>.from(_notifications);
+    _notifications = _notifications.where((n) => n['id'].toString() != id).toList();
+    if (!_disposed) notifyListeners();
+    try {
+      await _supabase.from('notifications').delete().eq('id', id);
+    } catch (_) {
+      // Rollback on failure
+      _notifications = prev;
+      if (!_disposed) notifyListeners();
+    }
+  }
+
   void reinit() {
     _notifications = [];
     _loading       = true;
