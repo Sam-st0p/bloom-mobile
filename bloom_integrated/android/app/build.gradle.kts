@@ -9,6 +9,10 @@ android {
     namespace = "com.example.bloom_gad_app"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
+    
+    defaultConfig {
+        minSdkVersion 24   // Jitsi requires minimum SDK 24
+    }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

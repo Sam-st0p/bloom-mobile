@@ -23,7 +23,7 @@ dependencies:
 
   # Environment
   flutter_dotenv: ^6.0.1
-  url_launcher: ^6.3.2
+  jitsi_meet_flutter_sdk: ^10.2.0
 
   # Android features
   gal: ^2.3.0
