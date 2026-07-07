@@ -4,7 +4,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:jitsi_meet_flutter_sdk/jitsi_meet_flutter_sdk.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../theme/app_theme.dart';
 import '../services/database_service.dart';
 
@@ -140,72 +140,82 @@ Map<String, dynamic> _seminarToCalendarEvent(Map<String, dynamic> sem) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  JOIN JITSI MEETING
+//  JOIN JITSI MEETING — opens in browser (works on all devices immediately)
 // ─────────────────────────────────────────────────────────────────────────────
 Future<void> _joinJitsiMeeting(BuildContext context, Map<String, dynamic> seminar) async {
   if (_seminarHasEnded(seminar)) {
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('This seminar has already ended and is no longer available to join.', style: GoogleFonts.nunito()),
-        backgroundColor: AppColors.danger, duration: const Duration(seconds: 4)));
+        content: Text('This seminar has already ended and is no longer available to join.',
+            style: GoogleFonts.nunito()),
+        backgroundColor: AppColors.danger,
+        duration: const Duration(seconds: 4)));
     }
     return;
   }
 
-  final seminarId   = seminar['id'] as String? ?? '';
   final seminarType = seminar['seminar_type'] as String? ?? 'webinar';
 
   if (seminarType == 'in_person') {
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('This is an in-person seminar. Please attend at the venue.', style: GoogleFonts.nunito()),
+        content: Text('This is an in-person seminar. Please attend at the venue.',
+            style: GoogleFonts.nunito()),
         backgroundColor: AppColors.primary));
     }
     return;
   }
 
-  try {
-    // Get the current user's display name from Supabase
-    final user     = Supabase.instance.client.auth.currentUser;
-    final profile  = await Supabase.instance.client
-        .from('profiles')
-        .select('full_name')
-        .eq('id', user?.id ?? '')
-        .maybeSingle();
-    final userName = (profile?['full_name'] as String?)?.trim().isNotEmpty == true
+  // Check if admin has started the meeting
+  // Admin sets seminar status to 'ongoing' when they start the meeting
+  final status = seminar['status'] as String? ?? 'upcoming';
+  if (status != 'ongoing') {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(
+          'The meeting has not started yet. Please wait for the administrator to start it.',
+          style: GoogleFonts.nunito()),
+        backgroundColor: AppColors.primary,
+        duration: const Duration(seconds: 4)));
+    }
+    return;
+  }
+
+  // Build room name — same formula as admin panel
+  final seminarId = seminar['id'] as String? ?? '';
+  final roomName  = 'bloom-gad-$seminarId';
+
+  // Get user display name for Jitsi
+  final user    = Supabase.instance.client.auth.currentUser;
+  final profile = await Supabase.instance.client
+      .from('profiles')
+      .select('full_name')
+      .eq('id', user?.id ?? '')
+      .maybeSingle();
+  final userName = Uri.encodeComponent(
+    (profile?['full_name'] as String?)?.trim().isNotEmpty == true
         ? profile!['full_name'] as String
-        : user?.email ?? 'Student';
+        : user?.email ?? 'Student',
+  );
 
-    // Build room name — same pattern used in admin panel
-    final roomName = 'bloom-gad-$seminarId';
+  // Build Jitsi URL with display name pre-filled
+  final jitsiUrl = Uri.parse(
+    'https://meet.jit.si/$roomName#userInfo.displayName="$userName"&config.startWithAudioMuted=false&config.startWithVideoMuted=false&config.disableDeepLinking=true',
+  );
 
-    final jitsi  = JitsiMeet();
-    final options = JitsiMeetConferenceOptions(
-      serverURL: 'https://meet.jit.si',   // Switch to https://meet.bloomgad.xyz after VPS setup
-      room:      roomName,
-      configOverrides: {
-        'startWithAudioMuted':  false,
-        'startWithVideoMuted':  false,
-        'subject':              seminar['title'] ?? 'BLOOM GAD Seminar',
-        'disableDeepLinking':   true,
-      },
-      featureFlags: {
-        'ios.screensharing.enabled': false,
-        'welcomepage.enabled':       false,
-        'chat.enabled':              true,
-        'raise-hand.enabled':        true,
-      },
-      userInfo: JitsiMeetUserInfo(
-        displayName: userName,
-        email:       user?.email ?? '',
-      ),
-    );
-
-    await jitsi.join(options);
+  try {
+    final launched = await launchUrl(jitsiUrl, mode: LaunchMode.externalApplication);
+    if (!launched && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Could not open the meeting. Please try again.',
+            style: GoogleFonts.nunito()),
+        backgroundColor: AppColors.danger));
+    }
   } catch (e) {
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('Could not join meeting: ${e.toString()}', style: GoogleFonts.nunito()),
+        content: Text('Could not open meeting: ${e.toString()}',
+            style: GoogleFonts.nunito()),
         backgroundColor: AppColors.danger));
     }
   }
@@ -352,8 +362,26 @@ class _SeminarsTabState extends State<_SeminarsTab> {
   }
 
   void _subscribeToRegistrationChanges() {
+    // Also subscribe to seminar status changes so Join Meeting button
+    // activates automatically when admin starts the meeting
     _regChannel = _db
-        .channel('seminar_registrations_changes')
+        .channel('seminar_and_registration_changes')
+        .onPostgresChanges(
+            event: PostgresChangeEvent.update,
+            schema: 'public',
+            table: 'seminars',
+            callback: (payload) {
+              // Update status in local list without full reload
+              final updated = payload.newRecord;
+              final id      = updated['id']?.toString();
+              if (id == null) return;
+              if (mounted) {
+                setState(() {
+                  _seminars = _seminars.map((s) =>
+                      s['id'].toString() == id ? {...s, ...updated} : s).toList();
+                });
+              }
+            })
         .onPostgresChanges(event: PostgresChangeEvent.insert, schema: 'public',
             table: 'seminar_registrations', callback: (_) => _refreshCounts())
         .onPostgresChanges(event: PostgresChangeEvent.delete, schema: 'public',
@@ -620,7 +648,7 @@ class _SeminarsTabState extends State<_SeminarsTab> {
           final maxP     = sem['max_participants'] as int?;
           final isFull   = maxP != null && regCount >= maxP && !isReg;
           final semType  = sem['seminar_type'] as String? ?? 'webinar';
-          final hasLink  = semType != 'in_person'; // Jitsi room always available for webinar/hybrid
+          final hasLink  = semType != 'in_person' && status == 'ongoing'; // Only show join when meeting is live
           final hasEnded = _seminarHasEnded(sem);
 
           String btnLabel;
@@ -704,7 +732,7 @@ class _SeminarsTabState extends State<_SeminarsTab> {
                       Expanded(child: OutlinedButton.icon(
                         onPressed: !hasEnded ? () => _joinJitsiMeeting(context, sem) : null,
                         icon: Icon(hasEnded ? Icons.link_off_rounded : Icons.open_in_new, size: 16),
-                        label: Text(hasEnded ? 'Ended' : 'Join Meeting', style: GoogleFonts.nunito(fontWeight: FontWeight.w700)),
+                        label: Text(hasEnded ? 'Ended' : status == 'ongoing' ? 'Join Meeting' : 'Not Started', style: GoogleFonts.nunito(fontWeight: FontWeight.w700)),
                         style: OutlinedButton.styleFrom(
                             foregroundColor: hasEnded ? Colors.grey[400] : AppColors.primary,
                             side: BorderSide(color: hasEnded ? Colors.grey[300]! : AppColors.primary),
@@ -996,7 +1024,7 @@ class _SeminarDetailScreenState extends State<SeminarDetailScreen> {
     final type     = sem['seminar_type'] as String? ?? 'webinar';
     final title    = sem['title'] as String? ?? '';
     final semType  = sem['seminar_type'] as String? ?? 'webinar';
-          final hasLink  = semType != 'in_person'; // Jitsi room always available for webinar/hybrid
+          final hasLink  = semType != 'in_person' && status == 'ongoing'; // Only show join when meeting is live
     final hasEnded = _seminarHasEnded(sem);
     final showRegBtn      = status != 'completed' && status != 'cancelled';
     final showEvalSection = _regStateReady && status == 'completed' && isReg;
