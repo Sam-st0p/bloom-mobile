@@ -9,6 +9,66 @@ import '../theme/app_theme.dart';
 import '../services/database_service.dart';
 
 final _db = Supabase.instance.client;
+// ─────────────────────────────────────────────────────────────────────────────
+//  MEETING TRACKER — global singleton for attendance duration tracking
+// ─────────────────────────────────────────────────────────────────────────────
+class _MeetingTracker {
+  static String?   seminarId;
+  static String?   userId;
+  static DateTime? joinTime;
+  static Timer?    _heartbeat;
+
+  static bool get isActive => seminarId != null && joinTime != null;
+
+  static void start(String sid, String uid, DateTime joinDt) {
+    seminarId = sid;
+    userId    = uid;
+    joinTime  = joinDt;
+    _heartbeat?.cancel();
+    _heartbeat = Timer.periodic(const Duration(seconds: 30), (_) async {
+      if (seminarId == null || userId == null || joinTime == null) return;
+      final now     = DateTime.now().toUtc();
+      final durMins = now.difference(joinTime!).inMinutes;
+      try {
+        await Supabase.instance.client.from('seminar_attendance_logs').upsert({
+          'seminar_id':        seminarId,
+          'user_id':           userId,
+          'join_time':         joinTime!.toIso8601String(),
+          'leave_time':        now.toIso8601String(),
+          'duration_minutes':  durMins,
+          'attendance_status': 'joined',
+          'is_eligible':       false,
+        }, onConflict: 'seminar_id,user_id');
+      } catch (e) { debugPrint('Heartbeat error: $e'); }
+    });
+  }
+
+  static Future<int> stop() async {
+    _heartbeat?.cancel();
+    _heartbeat = null;
+    if (seminarId == null || userId == null || joinTime == null) return 0;
+    final leaveTime = DateTime.now().toUtc();
+    final durMins   = leaveTime.difference(joinTime!).inMinutes;
+    final sid = seminarId!;
+    final uid = userId!;
+    final jt  = joinTime!.toIso8601String();
+    seminarId = null;
+    userId    = null;
+    joinTime  = null;
+    try {
+      await Supabase.instance.client.from('seminar_attendance_logs').upsert({
+        'seminar_id':        sid,
+        'user_id':           uid,
+        'join_time':         jt,
+        'leave_time':        leaveTime.toIso8601String(),
+        'duration_minutes':  durMins,
+        'attendance_status': durMins >= 1 ? 'present' : 'partial',
+        'is_eligible':       false,
+      }, onConflict: 'seminar_id,user_id');
+    } catch (e) { debugPrint('Stop attendance error: $e'); }
+    return durMins;
+  }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  SHARED REGISTRATION STATE
@@ -204,14 +264,35 @@ Future<void> _joinJitsiMeeting(BuildContext context, Map<String, dynamic> semina
   );
 
   try {
+    // ── Log join time ──────────────────────────────────────────────────────
+    final joinTimeDt = DateTime.now().toUtc();
+    await Supabase.instance.client.from('seminar_attendance_logs').upsert({
+      'seminar_id':        seminarId,
+      'user_id':           user?.id,
+      'join_time':         joinTimeDt.toIso8601String(),
+      'leave_time':        null,
+      'duration_minutes':  null,
+      'attendance_status': 'joined',
+      'is_eligible':       false,
+    }, onConflict: 'seminar_id,user_id');
+
+    // Tracking handled by _MeetingTracker.start() above
+
     final launched = await launchUrl(jitsiUrl, mode: LaunchMode.externalApplication);
     if (!launched && context.mounted) {
+      _MeetingTracker.stop();
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text('Could not open the meeting. Please try again.',
             style: GoogleFonts.nunito()),
         backgroundColor: AppColors.danger));
+      return;
     }
+    // Safety fallback: force-finalize after 30 min if lifecycle never fires
+    Future.delayed(const Duration(minutes: 30), () {
+      if (_MeetingTracker.isActive) _MeetingTracker.stop();
+    });
   } catch (e) {
+    _MeetingTracker.stop();
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text('Could not open meeting: ${e.toString()}',
@@ -327,7 +408,7 @@ class _SeminarsTab extends StatefulWidget {
   State<_SeminarsTab> createState() => _SeminarsTabState();
 }
 
-class _SeminarsTabState extends State<_SeminarsTab> {
+class _SeminarsTabState extends State<_SeminarsTab> with WidgetsBindingObserver {
   List<Map<String, dynamic>> _seminars   = [];
   bool _loading     = true;
   bool _loadingMore = false;
@@ -336,6 +417,8 @@ class _SeminarsTabState extends State<_SeminarsTab> {
   String _filter    = 'All';
   final Set<String> _registering  = {};
   final Set<String> _evaluatedIds = {}; // seminar IDs already evaluated by user
+
+  // Meeting tracking handled by _MeetingTracker singleton
   static const int  _pageSize    = 10;
   static const List<String> _filters = ['All', 'Live', 'Upcoming', 'Registered', 'Past'];
   final _scrollController = ScrollController();
@@ -345,6 +428,7 @@ class _SeminarsTabState extends State<_SeminarsTab> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _load();
     _scrollController.addListener(_onScroll);
     _statusTimer = Timer.periodic(const Duration(seconds: 30), (_) { if (mounted) setState(() {}); });
@@ -357,8 +441,36 @@ class _SeminarsTabState extends State<_SeminarsTab> {
     _scrollController.dispose();
     _statusTimer?.cancel();
     widget.regState.removeListener(_onRegStateChanged);
+    WidgetsBinding.instance.removeObserver(this);
+    _MeetingTracker.stop();
     _regChannel?.unsubscribe();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    // Trigger on resumed AND inactive — Android returns either state
+    // when user closes Chrome and returns to the app
+    if ((state == AppLifecycleState.resumed ||
+         state == AppLifecycleState.inactive) &&
+        _MeetingTracker.isActive) {
+      Future.delayed(const Duration(milliseconds: 500), () {
+        if (!_MeetingTracker.isActive) return;
+        _MeetingTracker.stop().then((durationMins) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text(
+                durationMins >= 1
+                    ? 'Attendance recorded: $durationMins minute${durationMins == 1 ? '' : 's'}.'
+                    : 'Attendance recorded.',
+                style: GoogleFonts.nunito()),
+              backgroundColor: AppColors.primary,
+              duration: const Duration(seconds: 4)));
+          }
+        });
+      });
+    }
   }
 
   void _subscribeToRegistrationChanges() {
@@ -421,6 +533,10 @@ class _SeminarsTabState extends State<_SeminarsTab> {
   }
 
   Future<void> _load() async {
+    // Fallback: finalize any active meeting tracker when load is called
+    if (_MeetingTracker.isActive) {
+      _MeetingTracker.stop();
+    }
     setState(() { _loading = true; _page = 0; _hasMore = true; });
     try {
       final sems = await _db.from('seminars').select('*').eq('is_public', true)
@@ -642,14 +758,14 @@ class _SeminarsTabState extends State<_SeminarsTab> {
           final semId    = sem['id'] as String;
           final isReg    = widget.regState.isRegistered(semId);
           final isBusy   = _registering.contains(semId);
-          final isOpen   = _registrationOpen(sem);
-          final regCount = _extractRegCount(sem);
+            final regCount = _extractRegCount(sem);
           final status   = _effectiveStatus(sem);
           final maxP     = sem['max_participants'] as int?;
           final isFull   = maxP != null && regCount >= maxP && !isReg;
           final semType  = sem['seminar_type'] as String? ?? 'webinar';
           final hasLink  = semType != 'in_person' && status == 'ongoing'; // Only show join when meeting is live
           final hasEnded = _seminarHasEnded(sem);
+          final isOpen   = _registrationOpen(sem);
 
           String btnLabel;
           final hasEvaluated = _evaluatedIds.contains(sem['id'].toString());

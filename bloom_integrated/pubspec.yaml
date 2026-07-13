@@ -23,7 +23,9 @@ dependencies:
 
   # Environment
   flutter_dotenv: ^6.0.1
-  jitsi_meet_flutter_sdk: ^10.2.0
+
+  # URL Launcher — used for opening Jitsi meetings in browser
+  url_launcher: ^6.3.0
 
   # Android features
   gal: ^2.3.0

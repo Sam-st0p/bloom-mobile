@@ -11,7 +11,7 @@ android {
     ndkVersion = flutter.ndkVersion
     
     defaultConfig {
-        minSdkVersion 24   // Jitsi requires minimum SDK 24
+        minSdk = 24   // Jitsi requires minimum SDK 24
     }
 
     compileOptions {
@@ -20,7 +20,7 @@ android {
     }
 
     kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_17.toString()
+        jvmTarget = "17"
     }
 
     defaultConfig {
