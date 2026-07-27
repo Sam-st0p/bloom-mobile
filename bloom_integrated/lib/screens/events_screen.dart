@@ -202,7 +202,23 @@ Map<String, dynamic> _seminarToCalendarEvent(Map<String, dynamic> sem) {
 // ─────────────────────────────────────────────────────────────────────────────
 //  JOIN JITSI MEETING — opens in browser (works on all devices immediately)
 // ─────────────────────────────────────────────────────────────────────────────
-Future<void> _joinJitsiMeeting(BuildContext context, Map<String, dynamic> seminar) async {
+Future<void> _joinJitsiMeeting(
+  BuildContext context,
+  Map<String, dynamic> seminar, {
+  required bool isRegistered,
+}) async {
+  // ── Gate: only registered participants may join ──────────────────────────
+  if (!isRegistered) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('You must be registered for this seminar to join the meeting.',
+            style: GoogleFonts.nunito()),
+        backgroundColor: AppColors.danger,
+        duration: const Duration(seconds: 4)));
+    }
+    return;
+  }
+
   if (_seminarHasEnded(seminar)) {
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -846,12 +862,14 @@ class _SeminarsTabState extends State<_SeminarsTab> with WidgetsBindingObserver 
                   Row(children: [
                     if (hasLink) ...[
                       Expanded(child: OutlinedButton.icon(
-                        onPressed: !hasEnded ? () => _joinJitsiMeeting(context, sem) : null,
-                        icon: Icon(hasEnded ? Icons.link_off_rounded : Icons.open_in_new, size: 16),
-                        label: Text(hasEnded ? 'Ended' : status == 'ongoing' ? 'Join Meeting' : 'Not Started', style: GoogleFonts.nunito(fontWeight: FontWeight.w700)),
+                        onPressed: (!hasEnded && isReg) ? () => _joinJitsiMeeting(context, sem, isRegistered: isReg) : null,
+                        icon: Icon(hasEnded ? Icons.link_off_rounded : (!isReg ? Icons.lock_outline : Icons.open_in_new), size: 16),
+                        label: Text(
+                            hasEnded ? 'Ended' : !isReg ? 'Not Registered' : status == 'ongoing' ? 'Join Meeting' : 'Not Started',
+                            style: GoogleFonts.nunito(fontWeight: FontWeight.w700)),
                         style: OutlinedButton.styleFrom(
-                            foregroundColor: hasEnded ? Colors.grey[400] : AppColors.primary,
-                            side: BorderSide(color: hasEnded ? Colors.grey[300]! : AppColors.primary),
+                            foregroundColor: (hasEnded || !isReg) ? Colors.grey[400] : AppColors.primary,
+                            side: BorderSide(color: (hasEnded || !isReg) ? Colors.grey[300]! : AppColors.primary),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
                       )),
                       const SizedBox(width: 10),
@@ -1210,7 +1228,17 @@ class _SeminarDetailScreenState extends State<SeminarDetailScreen> {
             const SizedBox(height: 20),
           ],
           if (hasLink) ...[
-            if (hasEnded) ...[
+            if (!isReg) ...[
+              Container(width: double.infinity, padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  decoration: BoxDecoration(color: Colors.grey[100], borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: Colors.grey[300]!)),
+                  child: Row(children: [
+                    Icon(Icons.lock_outline, size: 18, color: Colors.grey[500]), const SizedBox(width: 10),
+                    Expanded(child: Text('You must be registered for this seminar to join the meeting.',
+                        style: GoogleFonts.nunito(fontSize: 13, color: Colors.grey[600], height: 1.4))),
+                  ])),
+              const SizedBox(height: 10),
+            ] else if (hasEnded) ...[
               Container(width: double.infinity, padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                   decoration: BoxDecoration(color: Colors.orange[50], borderRadius: BorderRadius.circular(10),
                       border: Border.all(color: Colors.orange[200]!)),
@@ -1222,13 +1250,13 @@ class _SeminarDetailScreenState extends State<SeminarDetailScreen> {
               const SizedBox(height: 10),
             ],
             SizedBox(width: double.infinity, child: OutlinedButton.icon(
-              onPressed: !hasEnded ? () => _joinJitsiMeeting(context, sem) : null,
-              icon: Icon(hasEnded ? Icons.link_off_rounded : Icons.open_in_new, size: 18),
-              label: Text(hasEnded ? 'Seminar Ended' : 'Join Meeting',
+              onPressed: (!hasEnded && isReg) ? () => _joinJitsiMeeting(context, sem, isRegistered: isReg) : null,
+              icon: Icon(hasEnded ? Icons.link_off_rounded : (!isReg ? Icons.lock_outline : Icons.open_in_new), size: 18),
+              label: Text(hasEnded ? 'Seminar Ended' : !isReg ? 'Registration Required' : 'Join Meeting',
                   style: GoogleFonts.nunito(fontWeight: FontWeight.w800, fontSize: 15)),
               style: OutlinedButton.styleFrom(
-                  foregroundColor: hasEnded ? Colors.grey[400] : AppColors.primary,
-                  side: BorderSide(color: hasEnded ? Colors.grey[300]! : AppColors.primary, width: 2),
+                  foregroundColor: (hasEnded || !isReg) ? Colors.grey[400] : AppColors.primary,
+                  side: BorderSide(color: (hasEnded || !isReg) ? Colors.grey[300]! : AppColors.primary, width: 2),
                   padding: const EdgeInsets.symmetric(vertical: 14),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
             )),
