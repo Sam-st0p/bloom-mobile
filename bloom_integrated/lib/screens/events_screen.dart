@@ -599,7 +599,9 @@ class _SeminarsTabState extends State<_SeminarsTab> with WidgetsBindingObserver 
   Map<String, dynamic>? get _nextRegistered {
     for (final s in _seminars) {
       if (_effectiveStatus(s) == 'upcoming' &&
-          widget.regState.isRegistered(s['id'] as String)) return s;
+          widget.regState.isRegistered(s['id'] as String)) {
+        return s;
+      }
     }
     return null;
   }
@@ -730,42 +732,54 @@ class _SeminarsTabState extends State<_SeminarsTab> with WidgetsBindingObserver 
 
           // ── Live banner ──────────────────────────────────────────────
           if (live.isNotEmpty && _filter != 'Past') {
-            if (i == 0) return Padding(padding: const EdgeInsets.only(bottom: 14),
+            if (i == 0) {
+              return Padding(padding: const EdgeInsets.only(bottom: 14),
                 child: _HappeningNowBanner(
                   seminar: live.first, regCount: _extractRegCount(live.first),
                   onTap: () => Navigator.push(ctx, MaterialPageRoute(builder: (_) =>
                     SeminarDetailScreen(seminar: live.first, regState: widget.regState,
                         onRegister: () => _register(live.first)))).then((_) => _load())));
+            }
             i--;
           }
 
           // ── Filter chips ─────────────────────────────────────────────
-          if (i == 0) return Padding(padding: const EdgeInsets.only(bottom: 14),
+          if (i == 0) {
+            return Padding(padding: const EdgeInsets.only(bottom: 14),
               child: _filterChips(live.length));
+          }
           i--;
 
           // ── Your next seminar ─────────────────────────────────────────
           if (nextReg != null) {
-            if (i == 0) return Padding(padding: const EdgeInsets.only(bottom: 14),
+            if (i == 0) {
+              return Padding(padding: const EdgeInsets.only(bottom: 14),
                 child: _NextSeminarHighlight(seminar: nextReg,
                     onTap: () => Navigator.push(ctx, MaterialPageRoute(builder: (_) =>
                       SeminarDetailScreen(seminar: nextReg, regState: widget.regState,
                           onRegister: () => _register(nextReg)))).then((_) => _load())));
+            }
             i--;
           }
 
           // ── Empty state ───────────────────────────────────────────────
-          if (list.isEmpty) return const _EmptyState(
+          if (list.isEmpty) {
+            return const _EmptyState(
               icon: Icons.event_busy_rounded, title: 'Nothing here yet',
               sub: 'Try a different filter or check back later');
+          }
 
           // ── Loading / end ─────────────────────────────────────────────
           if (i == list.length) {
-            if (_loadingMore) return const Padding(padding: EdgeInsets.symmetric(vertical: 16),
+            if (_loadingMore) {
+              return const Padding(padding: EdgeInsets.symmetric(vertical: 16),
                 child: Center(child: CircularProgressIndicator(color: AppColors.primary, strokeWidth: 2)));
-            if (!_hasMore && _filter == 'All') return Padding(padding: const EdgeInsets.symmetric(vertical: 16),
+            }
+            if (!_hasMore && _filter == 'All') {
+              return Padding(padding: const EdgeInsets.symmetric(vertical: 16),
                 child: Center(child: Text('All ${_seminars.length} seminars loaded',
                     style: GoogleFonts.nunito(fontSize: 12, color: AppColors.textLight))));
+            }
           }
           if (i >= list.length) return const SizedBox.shrink();
 
@@ -785,8 +799,9 @@ class _SeminarsTabState extends State<_SeminarsTab> with WidgetsBindingObserver 
 
           String btnLabel;
           final hasEvaluated = _evaluatedIds.contains(sem['id'].toString());
-          if (isBusy)                              btnLabel = isReg ? 'Cancelling…' : 'Registering…';
-          else if (status == 'completed' && isReg && hasEvaluated) btnLabel = 'Evaluated ✓';
+          if (isBusy) {
+            btnLabel = isReg ? 'Cancelling…' : 'Registering…';
+          } else if (status == 'completed' && isReg && hasEvaluated) btnLabel = 'Evaluated ✓';
           else if (status == 'completed')          btnLabel = isReg ? 'Evaluate' : 'Not Registered';
           else if (status == 'cancelled')          btnLabel = 'Cancelled';
           else if (isFull)                         btnLabel = 'Fully Booked';
@@ -806,9 +821,11 @@ class _SeminarsTabState extends State<_SeminarsTab> with WidgetsBindingObserver 
                   _db.from('seminar_evaluations').select('seminar_id')
                       .eq('user_id', userId).not('submitted_at', 'is', null)
                       .then((evals) {
-                        if (mounted) setState(() {
+                        if (mounted) {
+                          setState(() {
                           _evaluatedIds.addAll((evals as List).map((e) => e['seminar_id'].toString()));
                         });
+                        }
                       });
                 }
                 _load();
