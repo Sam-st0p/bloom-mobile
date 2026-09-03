@@ -202,12 +202,11 @@ Map<String, dynamic> _seminarToCalendarEvent(Map<String, dynamic> sem) {
 // ─────────────────────────────────────────────────────────────────────────────
 //  JOIN JITSI MEETING — opens in browser (works on all devices immediately)
 // ─────────────────────────────────────────────────────────────────────────────
-Future<void> _joinJitsiMeeting(
+Future _joinJitsiMeeting(
   BuildContext context,
   Map<String, dynamic> seminar, {
   required bool isRegistered,
 }) async {
-  // ── Gate: only registered participants may join ──────────────────────────
   if (!isRegistered) {
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -231,7 +230,6 @@ Future<void> _joinJitsiMeeting(
   }
 
   final seminarType = seminar['seminar_type'] as String? ?? 'webinar';
-
   if (seminarType == 'in_person') {
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -242,8 +240,6 @@ Future<void> _joinJitsiMeeting(
     return;
   }
 
-  // Check if admin has started the meeting
-  // Admin sets seminar status to 'ongoing' when they start the meeting
   final status = seminar['status'] as String? ?? 'upcoming';
   if (status != 'ongoing') {
     if (context.mounted) {
@@ -257,31 +253,33 @@ Future<void> _joinJitsiMeeting(
     return;
   }
 
-  // Build room name — same formula as admin panel
-  final seminarId = seminar['id'] as String? ?? '';
-  final roomName  = 'bloom-gad-$seminarId';
+  // 1. Keep original UUID for DB, create sanitized string for Jitsi
+  final rawId = (seminar['id'] ?? seminar['seminar_id'])?.toString() ?? '';
+  final cleanId = rawId.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '').toLowerCase();
+  final roomName = 'bloomgad$cleanId';
 
-  // Get user display name for Jitsi
   final user    = Supabase.instance.client.auth.currentUser;
   final profile = await Supabase.instance.client
       .from('profiles')
       .select('full_name')
       .eq('id', user?.id ?? '')
       .maybeSingle();
-  final userName = Uri.encodeComponent(
-    (profile?['full_name'] as String?)?.trim().isNotEmpty == true
-        ? profile!['full_name'] as String
-        : user?.email ?? 'Student',
+
+  final rawName = (profile?['full_name'] as String?)?.trim().isNotEmpty == true
+      ? profile!['full_name'] as String
+      : user?.email ?? 'Student';
+  final encodedName = Uri.encodeComponent(rawName);
+
+  // 2. Jitsi URL string with force-browser config
+  final jitsiUrl = Uri.parse(
+    'https://meet.bloomgad.xyz/$roomName#userInfo.displayName=$encodedName&config.disableDeepLinking=true'
   );
 
- // Build Jitsi URL with display name pre-filled 
- final jitsiUrl = Uri.parse( 'https://meet.bloomgad.xyz/$roomName#userInfo.displayName="$userName"&config.startWithAudioMuted=false&config.startWithVideoMuted=false&config.disableDeepLinking=true', );
-
   try {
-    // ── Log join time ──────────────────────────────────────────────────────
+    // 3. Log attendance with original UUID
     final joinTimeDt = DateTime.now().toUtc();
     await Supabase.instance.client.from('seminar_attendance_logs').upsert({
-      'seminar_id':        seminarId,
+      'seminar_id':        rawId,
       'user_id':           user?.id,
       'join_time':         joinTimeDt.toIso8601String(),
       'leave_time':        null,
@@ -290,9 +288,14 @@ Future<void> _joinJitsiMeeting(
       'is_eligible':       false,
     }, onConflict: 'seminar_id,user_id');
 
-    // Tracking handled by _MeetingTracker.start() above
+    _MeetingTracker.start(rawId, user?.id ?? '', joinTimeDt);
 
-    final launched = await launchUrl(jitsiUrl, mode: LaunchMode.externalApplication);
+    // 4. Single clean launch call
+    final launched = await launchUrl(
+      jitsiUrl, 
+      mode: LaunchMode.externalApplication,
+    );
+
     if (!launched && context.mounted) {
       _MeetingTracker.stop();
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -301,7 +304,7 @@ Future<void> _joinJitsiMeeting(
         backgroundColor: AppColors.danger));
       return;
     }
-    // Safety fallback: force-finalize after 30 min if lifecycle never fires
+
     Future.delayed(const Duration(minutes: 30), () {
       if (_MeetingTracker.isActive) _MeetingTracker.stop();
     });
