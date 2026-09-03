@@ -274,10 +274,8 @@ Future<void> _joinJitsiMeeting(
         : user?.email ?? 'Student',
   );
 
-  // Build Jitsi URL with display name pre-filled
-  final jitsiUrl = Uri.parse(
-    'https://meet.jit.si/$roomName#userInfo.displayName="$userName"&config.startWithAudioMuted=false&config.startWithVideoMuted=false&config.disableDeepLinking=true',
-  );
+ // Build Jitsi URL with display name pre-filled 
+ final jitsiUrl = Uri.parse( 'https://meet.bloomgad.xyz/$roomName#userInfo.displayName="$userName"&config.startWithAudioMuted=false&config.startWithVideoMuted=false&config.disableDeepLinking=true', );
 
   try {
     // ── Log join time ──────────────────────────────────────────────────────
