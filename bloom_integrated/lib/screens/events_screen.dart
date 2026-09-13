@@ -253,7 +253,7 @@ Future _joinJitsiMeeting(
     return;
   }
 
-  // 1. Keep original UUID for DB, create sanitized string for Jitsi
+  // 1. Sanitize Seminar ID strictly (matches React Web Admin cleanId logic)
   final rawId = (seminar['id'] ?? seminar['seminar_id'])?.toString() ?? '';
   final cleanId = rawId.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '').toLowerCase();
   final roomName = 'bloomgad$cleanId';
@@ -268,15 +268,17 @@ Future _joinJitsiMeeting(
   final rawName = (profile?['full_name'] as String?)?.trim().isNotEmpty == true
       ? profile!['full_name'] as String
       : user?.email ?? 'Student';
+      
+  // Encode display name cleanly without extra wrapped quotes
   final encodedName = Uri.encodeComponent(rawName);
 
-  // 2. Jitsi URL string with force-browser config
+  // 2. Build Jitsi URL passing room parameters cleanly
   final jitsiUrl = Uri.parse(
-    'https://meet.bloomgad.xyz/$roomName#userInfo.displayName=$encodedName&config.disableDeepLinking=true'
+    'https://meet.bloomgad.xyz/$roomName#userInfo.displayName=$encodedName&config.disableDeepLinking=true',
   );
 
   try {
-    // 3. Log attendance with original UUID
+    // 3. Log attendance using original rawId (UUID format for Supabase)
     final joinTimeDt = DateTime.now().toUtc();
     await Supabase.instance.client.from('seminar_attendance_logs').upsert({
       'seminar_id':        rawId,
@@ -290,7 +292,7 @@ Future _joinJitsiMeeting(
 
     _MeetingTracker.start(rawId, user?.id ?? '', joinTimeDt);
 
-    // 4. Single clean launch call
+    // 4. Launch URL using inAppWebView / external application mode
     final launched = await launchUrl(
       jitsiUrl, 
       mode: LaunchMode.externalApplication,
@@ -318,6 +320,7 @@ Future _joinJitsiMeeting(
     }
   }
 }
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  EVENTS SCREEN
